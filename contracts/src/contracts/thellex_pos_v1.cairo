@@ -5,8 +5,25 @@ use thellexpos::interfaces::i_thellex_pos_v1::IThellexPOSV1;
 
 #[starknet::contract]
 pub mod ThellexPOSV1 {
-    use crate::interfaces::i_thellex_pos_factory::IThellexPOSFactoryDispatcherTrait;
-    use crate::interfaces::i_thellex_pos_factory::IThellexPOSFactoryDispatcher;
+    use crate::contracts::erc20::ERC20::IERC20Dispatcher;
+    use crate::interfaces::i_thellex_pos_factory::{
+        IThellexPOSFactoryDispatcherTrait, 
+        IThellexPOSFactoryDispatcher
+    };
+    use crate::interfaces::i_thellex_pos_v1::{
+      Initialized,
+      PaymentReceived,
+      BalanceCredited,
+      PaymentRejected,
+      AutoRefunded,
+      WithdrawalExecuted,
+      PaymentRequest,
+      PaymentRequestCreated,
+      PaymentRequestFulfilled,
+      ExternalDepositRegistered,
+      RefundSent,
+      ThellexPOSEvent
+    };
     use starknet::contract_address_const;
     use super::StoragePointerWriteAccess;
     use super::StoragePointerReadAccess;
@@ -38,7 +55,9 @@ pub mod ThellexPOSV1 {
         payment_timestamps: Map<felt252, u64>,
         transaction_counter: u256,
         admins: Map<ContractAddress, bool>,
-        factory: ContractAddress, // <- added factory reference
+        factory: ContractAddress, 
+        rejection_count: Map<ContractAddress, u8>,
+        payment_requests: Map<felt252, PaymentRequest>,
     }
 
     #[event]
@@ -50,90 +69,10 @@ pub mod ThellexPOSV1 {
         PaymentRejected: PaymentRejected,
         AutoRefunded: AutoRefunded,
         WithdrawalExecuted: WithdrawalExecuted,
-        // Bridged: Bridged,
-        SwapExecuted: SwapExecuted,
-        TokenSupportUpdated: TokenSupportUpdated,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct Initialized {
-        #[key]
-        owner: ContractAddress,
-        deposit_address: ContractAddress,
-        treasury: ContractAddress,
-        fee_percent: u256,
-        tax_percent: u256,
-        timeout: u64,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct TokenSupportUpdated {
-        #[key]
-        token: ContractAddress,
-        supported: bool,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct PaymentReceived {
-        #[key]
-        pub sender: ContractAddress,
-        pub amount: u256,
-        pub token: ContractAddress,
-        pub tx_id: felt252,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct BalanceCredited {
-        #[key]
-        pub merchant: ContractAddress,
-        pub amount: u256,
-        pub token: ContractAddress,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct PaymentRejected {
-        #[key]
-        pub sender: ContractAddress,
-        pub amount: u256,
-        pub token: ContractAddress,
-        pub tx_id: felt252,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct AutoRefunded {
-        #[key]
-        pub sender: ContractAddress,
-        pub amount: u256,
-        pub tax: u256,
-        pub token: ContractAddress,
-        pub tx_id: felt252,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct WithdrawalExecuted {
-        #[key]
-        pub recipient: ContractAddress,
-        pub amount: u256,
-        pub token: ContractAddress,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct Bridged {
-        #[key]
-        pub recipient: ContractAddress,
-        pub amount: u256,
-        pub token: ContractAddress,
-        pub target_chain: felt252,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct SwapExecuted {
-        #[key]
-        pub merchant: ContractAddress,
-        pub from_token: ContractAddress,
-        pub to_token: ContractAddress,
-        pub amount_in: u256,
-        pub amount_out: u256,
+        PaymentRequestCreated: PaymentRequestCreated,
+        PaymentRequestFulfilled: PaymentRequestFulfilled,
+        ExternalDepositRegistered: ExternalDepositRegistered,
+        RefundSent: RefundSent
     }
 
     #[constructor]
@@ -193,22 +132,65 @@ pub mod ThellexPOSV1 {
         }
 
         fn deposit(ref self: ContractState, amount: u256, tx_id: felt252, token: ContractAddress) {
+            //Existing checks
             assert(self.initialized.read(), 'Not initialized');
             assert(!self.paused.read(), 'Contract paused');
             assert(amount > 0, 'Invalid amount');
             assert(token.is_non_zero(), 'Invalid token');
-
             assert(IThellexPOSFactoryDispatcher { contract_address: self.factory.read() }
               .is_supported_token(token), 'Unsupported token');
 
             assert(self.deposits.read(tx_id) == 0, 'Duplicate tx_id');
 
+             // Transfer tokens from user to contract
             let sender = get_caller_address();
+            let token_contract = IERC20Dispatcher { contract_address: token };
+            // let success = token_contract.transferFrom(sender, starknet::get_contract_address(), amount);
+            // assert(success, 'Token transfer failed');
+
             self.deposits.write(tx_id, amount);
             self.deposit_senders.write(tx_id, sender);
             self.deposit_tokens.write(tx_id, token);
             self.deposit_timestamps.write(tx_id, get_block_timestamp());
             self.emit(Event::PaymentReceived(PaymentReceived { sender, amount, token, tx_id }));
+        }
+
+         fn register_external_deposit(
+            ref self: ContractState,
+            amount: u256,
+            token: ContractAddress,
+            sender: ContractAddress
+        ) -> felt252 {
+            assert(self.initialized.read(), 'Not initialized');
+            assert(!self.paused.read(), 'Contract paused');
+            assert(amount > 0, 'Invalid amount');
+            assert(token.is_non_zero(), 'Invalid token');
+            assert(sender.is_non_zero(), 'Invalid sender');
+            assert(IThellexPOSFactoryDispatcher { contract_address: self.factory.read() }
+                .is_supported_token(token), 'Unsupported token');
+
+            let tx_id_u256 = self.transaction_counter.read();
+            let tx_id: felt252 = tx_id_u256.low.into();
+            self.transaction_counter.write(self.transaction_counter.read() + 1);
+            assert(self.deposits.read(tx_id) == 0, 'Generated tx_id collision');
+
+            self.deposits.write(tx_id, amount);
+            self.deposit_senders.write(tx_id, sender);
+            self.deposit_tokens.write(tx_id, token);
+            self.deposit_timestamps.write(tx_id, get_block_timestamp());
+
+            self.emit(Event::PaymentReceived(PaymentReceived {
+                sender,
+                amount,
+                token,
+                tx_id
+            }));
+
+            self.emit(Event::ExternalDepositRegistered(
+                ExternalDepositRegistered { sender, amount, token, tx_id }
+            ));
+
+            tx_id
         }
 
         fn approve_transaction(ref self: ContractState, tx_id: felt252) {
@@ -227,6 +209,8 @@ pub mod ThellexPOSV1 {
             self.deposit_tokens.write(tx_id, contract_address_const::<0>());
             self.deposit_timestamps.write(tx_id, 0);
 
+            self.rejection_count.write(self.owner.read(), 0);
+
             self.emit(Event::BalanceCredited(BalanceCredited {
                 merchant: self.deposit_address.read(),
                 amount: net_amount,
@@ -243,6 +227,18 @@ pub mod ThellexPOSV1 {
             let sender = self.deposit_senders.read(tx_id);
             let token = self.deposit_tokens.read(tx_id);
 
+            let current_rejections = self.rejection_count.read(get_caller_address());
+            assert(current_rejections < 2 || self.balances.read(token) > 0, 'Rejection limit reached');
+
+            self.rejection_count.write(get_caller_address(), current_rejections + 1);
+
+            // --- Perform refund to provided address ---
+            assert(sender.is_non_zero(), 'Invalid refund address');
+
+            let erc20 = IERC20Dispatcher { contract_address: token };
+            // erc20.transfer(sendedr, amount);
+
+
             self.deposits.write(tx_id, 0);
             self.deposit_senders.write(tx_id, contract_address_const::<0>());
             self.deposit_tokens.write(tx_id, contract_address_const::<0>());
@@ -251,30 +247,140 @@ pub mod ThellexPOSV1 {
             self.emit(Event::PaymentRejected(PaymentRejected { sender, amount, token, tx_id }));
         }
 
-        fn auto_refunded_amount(ref self: ContractState, tx_id: felt252) {
+        fn auto_refunded_amount(
+            ref self: ContractState,
+            tx_id: felt252,
+            refund_receiver: ContractAddress 
+        ) {
             assert(self.initialized.read(), 'Not initialized');
             assert(!self.paused.read(), 'Contract paused');
+            assert(refund_receiver.is_non_zero(), 'Invalid refund receiver');
+
             let amount = self.deposits.read(tx_id);
             assert(amount > 0, 'Invalid or processed tx_id');
+
             let timestamp = self.deposit_timestamps.read(tx_id);
             assert(get_block_timestamp() >= timestamp + self.timeout.read(), 'Timeout not reached');
 
             let token = self.deposit_tokens.read(tx_id);
             let sender = self.deposit_senders.read(tx_id);
+
+            let current_rejections = self.rejection_count.read(self.owner.read());
+            assert(
+                current_rejections < 2 || self.balances.read(token) > 0,
+                'Rejection limit reached'
+            );
+
+            self.rejection_count.write(self.owner.read(), current_rejections + 1);
+
             let tax = amount * self.tax_percent.read() / 10000;
             let refund_amount = amount - tax;
 
+            // let transfer_result = IERC20Dispatcher { contract_address: token }
+            //     .transfer(refund_receiver, refund_amount);
+
+            // assert(transfer_result.is_ok(), 'Refund transfer failed');
+
+            // 🧾 Clear deposit state
             self.deposits.write(tx_id, 0);
             self.deposit_senders.write(tx_id, contract_address_const::<0>());
             self.deposit_tokens.write(tx_id, contract_address_const::<0>());
             self.deposit_timestamps.write(tx_id, 0);
 
-            self.emit(Event::AutoRefunded(AutoRefunded {
-                sender,
-                amount: refund_amount,
-                tax,
+            // 📢 Emit event with original sender and refund receiver for transparency
+            self.emit(Event::AutoRefunded(
+                AutoRefunded {
+                    sender,
+                    amount: refund_amount,
+                    tax,
+                    token,
+                    tx_id
+                }
+            ));
+
+            self.emit(Event::RefundSent(
+                RefundSent {
+                    original_sender: sender,
+                    refund_receiver,
+                    amount: refund_amount,
+                    token,
+                    tx_id
+                }
+            ));
+        }
+
+        fn create_payment_request(
+            ref self: ContractState,
+            amount: u256,
+            token: ContractAddress,
+            request_id: felt252
+        ) {
+            assert(self.initialized.read(), 'Not initialized');
+            assert(!self.paused.read(), 'Contract paused');
+            assert(self.admins.read(get_caller_address()), 'Unauthorized');
+            assert(amount > 0, 'Invalid amount');
+            assert(token.is_non_zero(), 'Invalid token');
+            assert(IThellexPOSFactoryDispatcher { contract_address: self.factory.read() }
+                .is_supported_token(token), 'Unsupported token');
+            assert(self.payment_requests.read(request_id).amount == 0, 'Duplicate request_id');
+
+            let request = PaymentRequest {
+                amount,
                 token,
-                tx_id
+                requester: get_caller_address(),
+                active: true,
+            };
+
+            self.payment_requests.write(request_id, request);
+            self.emit(Event::PaymentRequestCreated(PaymentRequestCreated {
+                    request_id,
+                    requester: get_caller_address(),
+                    amount,
+                    token
+                }
+            ));
+        }
+
+        fn fulfill_payment_request(
+            ref self: ContractState,
+            request_id: felt252,
+            amount: u256,
+            token: ContractAddress
+        ) {
+            assert(self.initialized.read(), 'Not initialized');
+            assert(!self.paused.read(), 'Contract paused');
+            assert(amount > 0, 'Invalid amount');
+            assert(token.is_non_zero(), 'Invalid token');
+
+            let request = self.payment_requests.read(request_id);
+            assert(request.active, 'Invalid or inactive request');
+            assert(request.amount == amount, 'Amount mismatch');
+            assert(request.token == token, 'Token mismatch');
+
+            assert(IThellexPOSFactoryDispatcher { contract_address: self.factory.read() }
+                .is_supported_token(token), 'Unsupported token');
+
+            let sender = get_caller_address();
+            let fee = amount * self.fee_percent.read() / 10000;
+            let net_amount = amount - fee;
+
+            self.balances.write(token, self.balances.read(token) + net_amount);
+            self.payment_requests.write(request_id, PaymentRequest {
+                amount: 0,
+                token: contract_address_const::<0>(),
+                requester: contract_address_const::<0>(),
+                active: false
+            });
+
+            self.rejection_count.write(self.owner.read(), 0);
+
+            self.emit(Event::PaymentRequestFulfilled(
+                PaymentRequestFulfilled { request_id, sender, amount, token }
+            ));
+            self.emit(Event::BalanceCredited(BalanceCredited {
+                merchant: self.deposit_address.read(),
+                amount: net_amount,
+                token
             }));
         }
 
@@ -318,51 +424,6 @@ pub mod ThellexPOSV1 {
                 i += 1;
             }
         }
-
-        // fn bridge_funds(
-        //     ref self: ContractState,
-        //     amount: u256,
-        //     target_chain: felt252,
-        //     recipient: ContractAddress,
-        //     token: ContractAddress
-        // ) {
-        //     assert(self.initialized.read(), 'Not initialized');
-        //     assert(!self.paused.read(), 'Contract paused');
-        //     assert(self.admins.read(get_caller_address()), 'Unauthorized');
-        //     assert(amount > 0, 'Invalid amount');
-        //     assert(recipient.is_non_zero(), 'Invalid recipient');
-        //     assert(token.is_non_zero(), 'Invalid token');
-        //     assert(self.balances.read(token) >= amount, 'Insufficient balance');
-
-        //     self.balances.write(token, self.balances.read(token) - amount);
-        //     self.emit(Event::Bridged(Bridged { recipient, amount, token, target_chain }));
-        // }
-
-        // fn swap_tokens(
-        //     ref self: ContractState,
-        //     amount: u256,
-        //     from_token: ContractAddress,
-        //     to_token: ContractAddress
-        // ) {
-        //     assert(self.initialized.read(), 'Not initialized');
-        //     assert(!self.paused.read(), 'Contract paused');
-        //     assert(self.admins.read(get_caller_address()), 'Unauthorized');
-        //     assert(amount > 0, 'Invalid amount');
-        //     assert(from_token.is_non_zero(), 'Invalid from_token');
-        //     assert(to_token.is_non_zero(), 'Invalid to_token');
-        //     assert(self.balances.read(from_token) >= amount, 'Insufficient balance');
-
-        //     let amount_out = amount;
-        //     self.balances.write(from_token, self.balances.read(from_token) - amount);
-        //     self.balances.write(to_token, self.balances.read(to_token) + amount_out);
-        //     self.emit(Event::SwapExecuted(SwapExecuted {
-        //         merchant: self.owner.read(),
-        //         from_token,
-        //         to_token,
-        //         amount_in: amount,
-        //         amount_out
-        //     }));
-        // }
 
         fn get_deposit(self: @ContractState, tx_id: felt252) -> (ContractAddress, u256, ContractAddress, u64) {
             (

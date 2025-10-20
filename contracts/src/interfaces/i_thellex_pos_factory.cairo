@@ -5,6 +5,7 @@ use starknet::{ContractAddress, ClassHash};
 pub enum ThellexPOSFactoryEvent {
     POSCreated: POSCreated,
     TokenSupportUpdated: TokenSupportUpdated,
+    FactoryInitialized: FactoryInitialized
 }
 
 #[derive(Drop, starknet::Event)]
@@ -19,6 +20,15 @@ pub struct TokenSupportUpdated {
     #[key]
     pub token: ContractAddress,
     pub supported: bool,
+}
+
+#[derive(Drop, starknet::Event)]
+pub struct FactoryInitialized {
+    pub treasury: ContractAddress,
+    pub fee_percent: u256,
+    pub tax_percent: u256,
+    pub timeout: u64,
+    pub admin: ContractAddress,
 }
 
 

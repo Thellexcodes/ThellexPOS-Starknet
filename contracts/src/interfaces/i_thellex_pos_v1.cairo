@@ -1,8 +1,5 @@
 use starknet::ContractAddress;
 
-// -----------------
-// Events
-// -----------------
 #[event]
 #[derive(Drop, starknet::Event)]
 pub enum ThellexPOSEvent {
@@ -12,8 +9,10 @@ pub enum ThellexPOSEvent {
     PaymentRejected: PaymentRejected,
     AutoRefunded: AutoRefunded,
     WithdrawalExecuted: WithdrawalExecuted,
-    Bridged: Bridged,
-    SwapExecuted: SwapExecuted,
+    PaymentRequestCreated: PaymentRequestCreated,
+    PaymentRequestFulfilled: PaymentRequestFulfilled,
+    ExternalDepositRegistered: ExternalDepositRegistered,
+    RefundSent: RefundSent
 }
 
 #[derive(Drop, starknet::Event)]
@@ -71,23 +70,48 @@ pub struct WithdrawalExecuted {
     pub token: ContractAddress,
 }
 
-#[derive(Drop, starknet::Event)]
-pub struct Bridged {
-    #[key]
-    pub recipient: ContractAddress,
+#[derive(Copy, Drop, Serde, starknet::Store)]
+pub struct PaymentRequest {
     pub amount: u256,
     pub token: ContractAddress,
-    pub target_chain: felt252,
+    pub requester: ContractAddress,
+    pub active: bool,
 }
 
 #[derive(Drop, starknet::Event)]
-pub struct SwapExecuted {
+pub struct PaymentRequestCreated {
     #[key]
-    pub merchant: ContractAddress,
-    pub from_token: ContractAddress,
-    pub to_token: ContractAddress,
-    pub amount_in: u256,
-    pub amount_out: u256,
+    pub request_id: felt252,
+    pub requester: ContractAddress,
+    pub amount: u256,
+    pub token: ContractAddress,
+}
+
+    #[derive(Drop, starknet::Event)]
+pub struct PaymentRequestFulfilled {
+    #[key]
+    pub request_id: felt252,
+    pub sender: ContractAddress,
+    pub amount: u256,
+    pub token: ContractAddress,
+}
+
+#[derive(Drop, starknet::Event)]
+pub struct ExternalDepositRegistered {
+    #[key]
+    pub sender: ContractAddress,
+    pub amount: u256,
+    pub token: ContractAddress,
+    pub tx_id: felt252,
+}
+
+#[derive(Drop, starknet::Event)]
+pub struct RefundSent{
+    pub original_sender: ContractAddress,
+    pub refund_receiver: ContractAddress,
+    pub amount: u256,
+    pub token: ContractAddress,
+    pub tx_id: felt252 
 }
 
 #[starknet::interface]
@@ -126,7 +150,7 @@ pub trait IThellexPOSV1<TContractState> {
     fn reject_transaction(ref self: TContractState, tx_id: felt252);
 
     // Refund unapproved deposits after timeout
-    fn auto_refunded_amount(ref self: TContractState, tx_id: felt252);
+    fn auto_refunded_amount(ref self: TContractState, tx_id: felt252, refund_receiver: ContractAddress);
 
     // Withdraw funds to a Starknet address
     fn withdraw_funds(
@@ -144,23 +168,6 @@ pub trait IThellexPOSV1<TContractState> {
         tokens: Array<ContractAddress>
     );
 
-    // // Bridge funds to another chain
-    // fn bridge_funds(
-    //     ref self: TContractState,
-    //     amount: u256,
-    //     target_chain: felt252,
-    //     recipient: ContractAddress,
-    //     token: ContractAddress
-    // );
-
-    // // Swap tokens to merchant's preferred token
-    // fn swap_tokens(
-    //     ref self: TContractState,
-    //     amount: u256,
-    //     from_token: ContractAddress,
-    //     to_token: ContractAddress
-    // );
-
     // Get deposit details
     fn get_deposit(
         self: @TContractState,
@@ -172,4 +179,24 @@ pub trait IThellexPOSV1<TContractState> {
       token: ContractAddress
     ) -> u256;
 
+    fn register_external_deposit(
+        ref self: TContractState,
+        amount: u256,
+        token: ContractAddress,
+        sender: ContractAddress
+    ) -> felt252;
+
+    fn create_payment_request(
+        ref self: TContractState,
+        amount: u256,
+        token: ContractAddress,
+        request_id: felt252
+    );
+
+    fn fulfill_payment_request(
+        ref self: TContractState,
+        request_id: felt252,
+        amount: u256,
+        token: ContractAddress
+    );
 }

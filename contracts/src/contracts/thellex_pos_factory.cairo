@@ -1,11 +1,16 @@
 #[starknet::contract]
 pub mod ThellexPOSFactory {
   
-  use starknet::get_contract_address;
-use crate::interfaces::i_thellex_pos_factory::TokenSupportUpdated;
-use starknet::storage::StorageMapReadAccess;
-use starknet::contract_address_const;
-use core::num::traits::Zero;
+use starknet::event::EventEmitter;
+use starknet::get_contract_address;
+  use crate::interfaces::i_thellex_pos_factory::{
+    TokenSupportUpdated, 
+    POSCreated, 
+    FactoryInitialized
+  };
+  use starknet::storage::StorageMapReadAccess;
+  use starknet::contract_address_const;
+  use core::num::traits::Zero;
   use starknet::storage::{
       Map, 
       StoragePointerWriteAccess, 
@@ -38,16 +43,9 @@ use core::num::traits::Zero;
   #[derive(Drop, starknet::Event)]
   pub enum Event {
       POSCreated: POSCreated,
-      TokenSupportUpdated: TokenSupportUpdated
+      TokenSupportUpdated: TokenSupportUpdated,
+      FactoryInitialized: FactoryInitialized
   }
-
-  #[derive(Drop, starknet::Event)]
-  pub struct POSCreated {
-      #[key]
-      pub merchant: ContractAddress,
-      pub pos_address: ContractAddress,
-  }
-
 
   // Implement the trait
   #[abi(embed_v0)]
@@ -65,6 +63,14 @@ use core::num::traits::Zero;
           self.timeout.write(timeout);
           self.admins.write(get_caller_address(), true);
           self.initialized.write(true);
+
+          self.emit(Event::FactoryInitialized(FactoryInitialized {
+            treasury,
+            fee_percent,
+            tax_percent,
+            timeout,
+            admin: get_caller_address(),
+          }));
       }
 
       fn add_supported_token(ref self: ContractState, token: ContractAddress) {

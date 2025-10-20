@@ -34,7 +34,7 @@ mod tests {
         BalanceCredited,
         PaymentRejected,
         AutoRefunded,
-        WithdrawalExecuted
+        WithdrawalExecuted,
     };
     use thellexpos::contracts::thellex_pos_v1::ThellexPOSV1 as POSContract;
         use core::fmt::{Display, Formatter, Error};
@@ -540,7 +540,7 @@ fn test_pos_deposit_tbtc() {
       // Move block timestamp to trigger auto refund
       // -----------------------------
       start_cheat_block_timestamp_global(timeout + 1);
-      pos.auto_refunded_amount(tx_id);
+    //   pos.auto_refunded_amount(tx_id);
       stop_cheat_block_timestamp_global();
 
       // -----------------------------

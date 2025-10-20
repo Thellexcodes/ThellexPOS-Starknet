@@ -1,0 +1,25 @@
+{
+  "name": "@thellex/pos-sdk",
+  "version": "1.0.0",
+  "description": "Thellex Point of Sale SDK",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": "git@github.com:Thellexcodes/ThellexPOS-Starknet.git",
+  "author": "Samuel Anthony",
+  "license": "MIT",
+  "dependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.2.0",
+    "starknet": "^7.6.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "jest",
+    "link": "npm link",
+    "unlink": "npm unlink",
+    "watch": "tsc --watch"
+  }
+}

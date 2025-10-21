@@ -2,13 +2,17 @@ import { Call, num, uint256 } from "starknet";
 import { BaseBuilder } from "../core/BaseBuilder";
 import { ContractAddress } from "../types";
 import { AbstractThellexPOS } from "./abstracts/ThellexPOS";
+import { ThellexPOSFactoryBuilder } from "./ThellexPOSFactoryBuilder";
 
-export class ThellexPOSBuilder
-  extends BaseBuilder
-  implements AbstractThellexPOS
-{
-  initializePOSContract(posAddress: ContractAddress): void {
-    this.getContract(posAddress, "ThellexPOSV1");
+export class ThellexPOSBuilder implements AbstractThellexPOS {
+  private factoryBuilder: ThellexPOSFactoryBuilder;
+
+  constructor(factoryBuilder: ThellexPOSFactoryBuilder) {
+    this.factoryBuilder = factoryBuilder;
+  }
+
+  async initializePOSContract(posAddress: ContractAddress): Promise<void> {
+    this.factoryBuilder.getContract(posAddress, "ThellexPOSV1");
   }
 
   buildDeposit(
@@ -70,14 +74,14 @@ export class ThellexPOSBuilder
   }
 
   async getDeposit(posAddress: ContractAddress, txId: string) {
-    const contract = this.getContract(posAddress, "ThellexPOSV1");
-    const result = await contract.get_deposit(txId);
-    return {
-      sender: num.toHex(result.sender),
-      amount: uint256.uint256ToBN(result.amount).toString(),
-      token: num.toHex(result.token),
-      txId: num.toHex(result.tx_id),
-      timestamp: result.timestamp.toString(),
-    };
+    // const contract = this.getContract(posAddress, "ThellexPOSV1");
+    // const result = await contract.get_deposit(txId);
+    // return {
+    //   sender: num.toHex(result.sender),
+    //   amount: uint256.uint256ToBN(result.amount).toString(),
+    //   token: num.toHex(result.token),
+    //   txId: num.toHex(result.tx_id),
+    //   timestamp: result.timestamp.toString(),
+    // };
   }
 }

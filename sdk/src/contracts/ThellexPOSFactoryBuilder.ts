@@ -9,8 +9,6 @@ export class ThellexPOSFactoryBuilder
   extends BaseBuilder
   implements AbstractThellexPOSFactory
 {
-  protected contracts: Map<string, Contract> | any;
-
   /**
    * Builds a deployment call for a contract.
    * @param contractPath Relative path to the compiled contract JSON file (relative to contractsPath).
@@ -89,12 +87,30 @@ export class ThellexPOSFactoryBuilder
     throw new Error("Method not implemented.");
   }
   buildCreatePOS(
+    factoryAddress: ContractAddress,
+    abiPath: string,
     owner: ContractAddress,
-    depositAddress: ContractAddress,
     posClassHash: string
   ): Call {
-    throw new Error("Method not implemented.");
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    const tx: Call = contract.populate("create_pos", [
+      owner,
+      this.treasuryAddress,
+      posClassHash,
+    ]);
+    return tx;
   }
+  // async buildCreatePOS(
+  //   factoryAddress: ContractAddress,
+  //   abiPath: string,
+  //   owner: ContractAddress,
+  //   posClassHash: string
+  // ): Promise<Call> {
+
+  // }
   buildUpdateTreasury(newTreasury: ContractAddress): Call {
     throw new Error("Method not implemented.");
   }

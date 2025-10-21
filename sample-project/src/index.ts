@@ -1,4 +1,10 @@
-import { ContractAddress, ThellexPOSFactoryBuilder } from "@thellex/pos-sdk";
+import {
+  BaseBuilderConfigArgs,
+  ContractAddress,
+  POSConstructorArgs,
+  ThellexPOSBuilder,
+  ThellexPOSFactoryBuilder,
+} from "@thellex/pos-sdk";
 import path, { join } from "path";
 import { Account, RpcProvider, hash } from "starknet";
 import fs from "fs";
@@ -11,13 +17,9 @@ async function main() {
 
   // Account details
   const FACTORY_PRIVATE_KEY =
-    "0x000000000000000000000000000000003c60270280e85849443bfb111e6d5f88";
+    "0x00000000000000000000000000000000ad54905f9361dde207deffc4a2e332d0";
   const FACTORY_ACCOUNT_ADDRESS =
-    "0x0743f3d517e33d4ef62e41b025bc121ea219656bdf80df92ff26dec740f0f69f";
-
-  // Predeployed UDC
-  // Address: 0x41A78E741E5AF2FEC34B695679BC6891742439F7AFB8484ECD7766661AD02BF
-  // Class Hash: 0x7B3E
+    "0x03a33cdea932bcd7d6a7915223965dd4a379896cb34d443002abf0f8555cf744";
 
   const factoryAccount = new Account(
     provider,
@@ -28,11 +30,13 @@ async function main() {
   // Path to compiled contracts
   const CONTRACTS_DIR = join(process.cwd(), "../contracts/target/dev");
   const FACTORY_FILENAME = "thellexpos_ThellexPOSFactory.contract_class.json";
+  const POS_FILENAME = "thellexpos_ThellexPOSV1.contract_class.json";
 
   //  FACTORY_ACCOUNT_ADDRESS, nodeUrl, CONTRACTS_DIR, FACTORY_FILENAME;
   // Initialize the Factory Builder
   const factoryBuilder = new ThellexPOSFactoryBuilder({
     treasuryAddress: FACTORY_ACCOUNT_ADDRESS,
+    // @ts-ignore
     nodeUrl,
     contractsPath: CONTRACTS_DIR,
     factoryContractPath: FACTORY_FILENAME,
@@ -41,30 +45,74 @@ async function main() {
 
   // // Full path to the compiled factory contract
   const factoryContractPath = join(CONTRACTS_DIR, FACTORY_FILENAME);
+  const posContractPath = join(CONTRACTS_DIR, POS_FILENAME);
 
   // Parse the compiled factory contract JSON
   const compiledFactoryContract = JSON.parse(
     fs.readFileSync(factoryContractPath, "utf8")
   );
 
+  const compiledPosContract = JSON.parse(
+    fs.readFileSync(posContractPath, "utf8")
+  );
+
   // Compute class hash using the file path
   const factoryClassHash = factoryBuilder.computeClassHash(factoryContractPath);
+  const posClasHash = factoryBuilder.computeClassHash(posContractPath);
 
   //deploy contract
   // Declare the factory contract if not already declared
-  const declareResponse = await factoryAccount.declareIfNot({
+  const declareFactoryResponse = await factoryAccount.declareIfNot({
     contract: compiledFactoryContract,
     compiledClassHash: factoryClassHash,
   });
 
+  const declarePosResponse = await factoryAccount.declareIfNot({
+    contract: compiledPosContract,
+    compiledClassHash: posClasHash,
+  });
+
+  // console.log({ declarePosResponse });
+
+  // console.log({ declareResponse });
+
   // Deploy the factory contract
+  const deployFactoryResponse = await factoryAccount.deployContract({
+    classHash: factoryClassHash,
+    constructorCalldata: [],
+  });
 
-  //const deployResponse = await factoryAccount.deployContract({
-  //   classHash: factoryClassHash,
-  //   constructorCalldata: [],
-  // });
+  const posConstructorArgs: POSConstructorArgs = {
+    owner: factoryAccount.address,
+    deposit_address: FACTORY_ACCOUNT_ADDRESS,
+    treasury: "0xabcdefabcdefabcdef...", // replace with actual treasury address
+    fee_percent: 500, // example: 5% (in basis points)
+    tax_percent: 200, // example: 2% (in basis points)
+    timeout: 86400, // example: 24 hours
+    factory_address: deployFactoryResponse.contract_address,
+  };
 
-  // console.log({ deployResponse });
+  // // Convert u256 fields to Cairo-compatible format (low, high)
+  // const feePercentUint256 = uint256.bnToUint256(posConstructorArgs.fee_percent);
+  // const taxPercentUint256 = uint256.bnToUint256(posConstructorArgs.tax_percent);
+
+  // Deploy the pos contract
+
+  // Deploy POS contract with constructor calldata
+  const deployPosResponse = await factoryAccount.deployContract({
+    classHash: posClasHash,
+    constructorCalldata: [
+      posConstructorArgs.owner,
+      posConstructorArgs.deposit_address,
+      posConstructorArgs.treasury,
+      feePercentUint256.low,
+      feePercentUint256.high,
+      taxPercentUint256.low,
+      taxPercentUint256.high,
+      posConstructorArgs.timeout,
+      posConstructorArgs.factory_address,
+    ],
+  });
 
   // sign with another account
   // const deployCall = await factoryBuilder.buildFactoryDeployment(
@@ -84,7 +132,7 @@ async function main() {
 
   // initialize factory
   // const initializeedTx = await factoryBuilder.buildInitializeFactoryTransaction(
-  //   "0x6ca112f6ee51d5d6fbd567d8a9dad0f9567bb82eb7eaa75ec8c68a69ba37942" as ContractAddress,
+  //   deployFactoryResponse.contract_address as ContractAddress,
   //   FACTORY_FILENAME,
   //   {
   //     feePercent: 500,
@@ -98,10 +146,10 @@ async function main() {
   //   initializeedTx
   // );
 
-  let shouldCancel = false;
+  let shouldCancel = true;
 
   await factoryBuilder.monitorEvents(
-    "0x6ca112f6ee51d5d6fbd567d8a9dad0f9567bb82eb7eaa75ec8c68a69ba37942",
+    deployFactoryResponse.contract_address,
     ["FactoryInitialized"],
     async (eventData) => {
       console.log("New event:", eventData.event.type, eventData.event.data);
@@ -111,6 +159,19 @@ async function main() {
     factoryContractPath,
     () => shouldCancel
   );
+
+  // console.log({ addr: deployPosResponse.contract_address });
+
+  // //create POS
+  // const posAddress = factoryBuilder.buildCreatePOS(
+  //   deployPosResponse.contract_address as ContractAddress,
+  //   FACTORY_FILENAME,
+  //   FACTORY_ACCOUNT_ADDRESS,
+  //   posClasHash
+  // );
+
+  // const posBuilder = new ThellexPOSBuilder(factoryBuilder);
+  // const initializeTx = await posBuilder.initializePOSContract();
 }
 
 main().catch(console.error);

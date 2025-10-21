@@ -32,10 +32,11 @@ export abstract class AbstractThellexPOSFactory {
 
   /** Build a transaction to create a POS instance */
   abstract buildCreatePOS(
+    factoryAddress: ContractAddress,
+    abiPath: string,
     owner: ContractAddress,
-    depositAddress: ContractAddress,
     posClassHash: string
-  ): Call | any;
+  ): Call;
 
   /** Build a transaction to update treasury */
   abstract buildUpdateTreasury(newTreasury: ContractAddress): Call | any;

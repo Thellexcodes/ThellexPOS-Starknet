@@ -20,6 +20,7 @@ import {
 import { BaseBuilderConfigArgs, ContractAddress } from "../types";
 
 export abstract class BaseBuilder {
+  protected config: BaseBuilderConfigArgs;
   protected provider: Provider;
   protected contracts: Map<string, Contract> = new Map();
   public contractsPath: string;
@@ -29,6 +30,7 @@ export abstract class BaseBuilder {
   public udcAddress: ContractAddress;
 
   constructor(config: BaseBuilderConfigArgs) {
+    this.config = config;
     this.provider = new RpcProvider({ nodeUrl: config.nodeUrl });
     this.contractsPath = config.contractsPath;
     this.treasuryAddress = config.treasuryAddress;
@@ -43,7 +45,7 @@ export abstract class BaseBuilder {
   /**
    * Loads a contract ABI and caches it for reuse.
    */
-  protected getContract(address: string, abiPath: string): Contract {
+  getContract(address: string, abiPath: string): Contract {
     if (this.contracts.has(address)) {
       return this.contracts.get(address)!;
     }

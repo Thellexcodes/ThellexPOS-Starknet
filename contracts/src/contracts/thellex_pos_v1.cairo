@@ -133,15 +133,12 @@ pub mod ThellexPOSV1 {
             assert(token.is_non_zero(), 'Invalid token');
             assert(IThellexPOSFactoryDispatcher { contract_address: self.factory.read() }
               .is_supported_token(token), 'Unsupported token');
-
             assert(self.deposits.read(tx_id) == 0, 'Duplicate tx_id');
-
              // Transfer tokens from user to contract
             let sender = get_caller_address();
             let token_contract = IERC20Dispatcher { contract_address: token };
             // let success = token_contract.transferFrom(sender, starknet::get_contract_address(), amount);
             // assert(success, 'Token transfer failed');
-
             self.deposits.write(tx_id, amount);
             self.deposit_senders.write(tx_id, sender);
             self.deposit_tokens.write(tx_id, token);

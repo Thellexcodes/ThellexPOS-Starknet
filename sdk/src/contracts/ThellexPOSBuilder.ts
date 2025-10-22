@@ -1,20 +1,19 @@
-import { Call, num, uint256 } from "starknet";
-import { BaseBuilder } from "../core/BaseBuilder";
+import { Call, uint256 } from "starknet";
 import { ContractAddress } from "../types";
 import { AbstractThellexPOS } from "./abstracts/ThellexPOS";
 import { ThellexPOSFactoryBuilder } from "./ThellexPOSFactoryBuilder";
 
-export class ThellexPOSBuilder implements AbstractThellexPOS {
+export class ThellexPOSBuilder extends AbstractThellexPOS {
   private factoryBuilder: ThellexPOSFactoryBuilder;
 
   constructor(factoryBuilder: ThellexPOSFactoryBuilder) {
+    super();
     this.factoryBuilder = factoryBuilder;
   }
 
-  async initializePOSContract(posAddress: ContractAddress): Promise<void> {
-    this.factoryBuilder.getContract(posAddress, "ThellexPOSV1");
-  }
-
+  /**
+   * Build a deposit transaction
+   */
   buildDeposit(
     posAddress: ContractAddress,
     amount: string,
@@ -28,6 +27,9 @@ export class ThellexPOSBuilder implements AbstractThellexPOS {
     };
   }
 
+  /**
+   * Build a transaction approval call
+   */
   buildApproveTransaction(posAddress: ContractAddress, txId: string): Call {
     return {
       contractAddress: posAddress,
@@ -36,6 +38,9 @@ export class ThellexPOSBuilder implements AbstractThellexPOS {
     };
   }
 
+  /**
+   * Build a transaction rejection call
+   */
   buildRejectTransaction(posAddress: ContractAddress, txId: string): Call {
     return {
       contractAddress: posAddress,
@@ -44,6 +49,9 @@ export class ThellexPOSBuilder implements AbstractThellexPOS {
     };
   }
 
+  /**
+   * Build an automatic refund call
+   */
   buildAutoRefund(
     posAddress: ContractAddress,
     txId: string,
@@ -56,6 +64,9 @@ export class ThellexPOSBuilder implements AbstractThellexPOS {
     };
   }
 
+  /**
+   * Build a withdrawal transaction call
+   */
   buildWithdraw(
     posAddress: ContractAddress,
     recipient: ContractAddress,
@@ -73,15 +84,92 @@ export class ThellexPOSBuilder implements AbstractThellexPOS {
     };
   }
 
-  async getDeposit(posAddress: ContractAddress, txId: string) {
-    // const contract = this.getContract(posAddress, "ThellexPOSV1");
-    // const result = await contract.get_deposit(txId);
+  /**
+   * Retrieve deposit details from a POS contract
+   */
+  async getDeposit(posAddress: ContractAddress, txId: string): Promise<any> {
+    const contract = await this.factoryBuilder.getContract(
+      posAddress,
+      "ThellexPOSV1"
+    );
+    const result = await contract.call("get_deposit", [txId]);
+
     // return {
     //   sender: num.toHex(result.sender),
     //   amount: uint256.uint256ToBN(result.amount).toString(),
     //   token: num.toHex(result.token),
     //   txId: num.toHex(result.tx_id),
-    //   timestamp: result.timestamp.toString(),
+    //   timestamp: BigInt(result.timestamp).toString(),
+    //   approved: Boolean(result.approved),
+    //   refunded: Boolean(result.refunded),
     // };
+  }
+
+  /**
+   * Get balance of a given token for the POS contract
+   */
+  async getPOSBalance(
+    posAddress: ContractAddress,
+    token: ContractAddress
+  ): Promise<string | any> {
+    const contract = await this.factoryBuilder.getContract(
+      posAddress,
+      "ThellexPOSV1"
+    );
+    const result = await contract.call("get_balance", [token]);
+    // return uint256.uint256ToBN(result.balance).toString();
+  }
+
+  /**
+   * Get all pending transactions on the POS
+   */
+  async getPendingTransactions(posAddress: ContractAddress): Promise<any> {
+    const contract = await this.factoryBuilder.getContract(
+      posAddress,
+      "ThellexPOSV1"
+    );
+    const result = await contract.call("get_pending_transactions", []);
+    // return result.tx_ids.map((id: string) => num.toHex(id));
+  }
+
+  /**
+   * Get owner of the POS contract
+   */
+  async getOwner(posAddress: ContractAddress): Promise<ContractAddress | any> {
+    const contract = await this.factoryBuilder.getContract(
+      posAddress,
+      "ThellexPOSV1"
+    );
+    const result = await contract.call("get_owner", []);
+    // return result.owner;
+  }
+
+  /**
+   * Get current treasury address used by the POS contract
+   */
+  async getTreasury(
+    posAddress: ContractAddress
+  ): Promise<ContractAddress | any> {
+    const contract = await this.factoryBuilder.getContract(
+      posAddress,
+      "ThellexPOSV1"
+    );
+    const result = await contract.call("get_treasury", []);
+    // return result.treasury;
+  }
+
+  /**
+   * Check if a token is supported by the POS contract
+   */
+  async isSupportedToken(
+    posAddress: ContractAddress,
+    token: ContractAddress
+  ): Promise<boolean | any> {
+    const contract = await this.factoryBuilder.getContract(
+      posAddress,
+      "ThellexPOSV1"
+    );
+    const result = await contract.call("is_supported_token", [token]);
+    // return Boolean(result.supported);
   }
 }

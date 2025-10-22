@@ -228,7 +228,7 @@ await factoryBuilder.sendTransaction(
 );
 ```
 
-## 5. POS Creation & Event Monitoring
+## POS Creation & Event Monitoring
 
 After deploying the factory, you can create a POS instance and listen for the **POSCreated** event to retrieve the deployed POS address.
 

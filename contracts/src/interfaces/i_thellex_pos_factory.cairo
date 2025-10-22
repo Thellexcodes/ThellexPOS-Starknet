@@ -10,14 +10,12 @@ pub enum ThellexPOSFactoryEvent {
 
 #[derive(Drop, starknet::Event)]
 pub struct POSCreated {
-    #[key]
     pub merchant: ContractAddress,
     pub pos_address: ContractAddress,
 }
 
 #[derive(Drop, starknet::Event)]
 pub struct TokenSupportUpdated {
-    #[key]
     pub token: ContractAddress,
     pub supported: bool,
 }
@@ -30,7 +28,6 @@ pub struct FactoryInitialized {
     pub timeout: u64,
     pub admin: ContractAddress,
 }
-
 
 #[starknet::interface]
 pub trait IThellexPOSFactory<TContractState> {
@@ -47,7 +44,6 @@ pub trait IThellexPOSFactory<TContractState> {
     fn create_pos(
         ref self: TContractState,
         owner: ContractAddress,
-        deposit_address: ContractAddress,
         pos_class_hash: ClassHash,
     ) -> ContractAddress;
 

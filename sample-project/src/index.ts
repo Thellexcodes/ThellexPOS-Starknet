@@ -1,23 +1,27 @@
-import { ContractAddress, ThellexPOSFactoryBuilder } from "@thellex/pos-sdk";
-import path, { join } from "path";
-import { Account, RpcProvider, hash } from "starknet";
+import {
+  ContractAddress,
+  POSConstructorArgs,
+  ThellexPOSBuilder,
+  ThellexPOSFactoryBuilder,
+} from "@thellex/pos-sdk";
+import { join } from "path";
+import { Account, RpcProvider } from "starknet";
 import fs from "fs";
-import { EventCallbackData } from "@thellex/pos-sdk/dist/types/events";
 
 async function main() {
-  // Setup provider and account
+  // ============================================================
+  // 🧠 SETUP SECTION
+  // ------------------------------------------------------------
+  // This section initializes the provider, account, and contract paths.
+  // ============================================================
+
   const nodeUrl = "http://127.0.0.1:5050";
   const provider = new RpcProvider({ nodeUrl });
 
-  // Account details
   const FACTORY_PRIVATE_KEY =
-    "0x000000000000000000000000000000003c60270280e85849443bfb111e6d5f88";
+    "0x00000000000000000000000000000000ad54905f9361dde207deffc4a2e332d0";
   const FACTORY_ACCOUNT_ADDRESS =
-    "0x0743f3d517e33d4ef62e41b025bc121ea219656bdf80df92ff26dec740f0f69f";
-
-  // Predeployed UDC
-  // Address: 0x41A78E741E5AF2FEC34B695679BC6891742439F7AFB8484ECD7766661AD02BF
-  // Class Hash: 0x7B3E
+    "0x03a33cdea932bcd7d6a7915223965dd4a379896cb34d443002abf0f8555cf744";
 
   const factoryAccount = new Account(
     provider,
@@ -25,12 +29,29 @@ async function main() {
     FACTORY_PRIVATE_KEY
   );
 
-  // Path to compiled contracts
+  // Contract compilation directories
   const CONTRACTS_DIR = join(process.cwd(), "../contracts/target/dev");
   const FACTORY_FILENAME = "thellexpos_ThellexPOSFactory.contract_class.json";
+  const POS_FILENAME = "thellexpos_ThellexPOSV1.contract_class.json";
 
-  //  FACTORY_ACCOUNT_ADDRESS, nodeUrl, CONTRACTS_DIR, FACTORY_FILENAME;
-  // Initialize the Factory Builder
+  const factoryContractPath = join(CONTRACTS_DIR, FACTORY_FILENAME);
+  const posContractPath = join(CONTRACTS_DIR, POS_FILENAME);
+
+  // Read compiled contract files
+  const compiledFactoryContract = JSON.parse(
+    fs.readFileSync(factoryContractPath, "utf8")
+  );
+  const compiledPosContract = JSON.parse(
+    fs.readFileSync(posContractPath, "utf8")
+  );
+
+  // ============================================================
+  // 🏗️ FACTORY DEPLOYMENT & INITIALIZATION
+  // ------------------------------------------------------------
+  // Deploys the ThellexPOSFactory contract and initializes it with
+  // default parameters such as fee, tax, and timeout.
+  // ============================================================
+
   const factoryBuilder = new ThellexPOSFactoryBuilder({
     treasuryAddress: FACTORY_ACCOUNT_ADDRESS,
     nodeUrl,
@@ -39,78 +60,226 @@ async function main() {
     udcAddress: "0x",
   });
 
-  // // Full path to the compiled factory contract
-  const factoryContractPath = join(CONTRACTS_DIR, FACTORY_FILENAME);
-
-  // Parse the compiled factory contract JSON
-  const compiledFactoryContract = JSON.parse(
-    fs.readFileSync(factoryContractPath, "utf8")
-  );
-
-  // Compute class hash using the file path
   const factoryClassHash = factoryBuilder.computeClassHash(factoryContractPath);
+  const posClassHash = factoryBuilder.computeClassHash(posContractPath);
 
-  //deploy contract
-  // Declare the factory contract if not already declared
-  const declareResponse = await factoryAccount.declareIfNot({
+  // Declare contracts if not already declared
+  await factoryAccount.declareIfNot({
     contract: compiledFactoryContract,
     compiledClassHash: factoryClassHash,
   });
+  await factoryAccount.declareIfNot({
+    contract: compiledPosContract,
+    compiledClassHash: posClassHash,
+  });
 
   // Deploy the factory contract
+  const deployFactoryResponse = await factoryAccount.deployContract({
+    classHash: factoryClassHash,
+    constructorCalldata: [],
+  });
 
-  //const deployResponse = await factoryAccount.deployContract({
-  //   classHash: factoryClassHash,
-  //   constructorCalldata: [],
-  // });
+  // Initialize the factory contract
+  const initTx = await factoryBuilder.buildInitializeFactoryTransaction(
+    deployFactoryResponse.contract_address as ContractAddress,
+    FACTORY_FILENAME,
+    { feePercent: 500, taxPercent: 200, timeout: 3600 }
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, initTx);
 
-  // console.log({ deployResponse });
+  console.log("✅ Factory deployed and initialized:", {
+    address: deployFactoryResponse.contract_address,
+  });
 
-  // sign with another account
-  // const deployCall = await factoryBuilder.buildFactoryDeployment(
+  // ============================================================
+  // ⚙️ FACTORY MANAGEMENT FUNCTIONS
+  // ------------------------------------------------------------
+  // Demonstrates factory-level administrative operations such as
+  // adding/removing supported tokens and updating parameters.
+  // ============================================================
+
+  const tokenAddress = "0x1111111111111111111111111111111111111111";
+
+  // Add supported token
+  const addTokenTx = factoryBuilder.buildAddSupportedToken(
+    deployFactoryResponse.contract_address as ContractAddress,
+    tokenAddress,
+    FACTORY_FILENAME
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, addTokenTx);
+
+  // Remove supported token
+  const removeTokenTx = factoryBuilder.buildRemoveSupportedToken(
+    deployFactoryResponse.contract_address as ContractAddress,
+    tokenAddress,
+    FACTORY_FILENAME
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, removeTokenTx);
+
+  // Update treasury address
+  const updateTreasuryTx = factoryBuilder.buildUpdateTreasury(
+    deployFactoryResponse.contract_address as ContractAddress,
+    "0x2222222222222222222222222222222222222222",
+    FACTORY_FILENAME
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, updateTreasuryTx);
+
+  // Update fee percent
+  const updateFeeTx = factoryBuilder.buildUpdateFeePercent(
+    deployFactoryResponse.contract_address as ContractAddress,
+    700,
+    FACTORY_FILENAME
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, updateFeeTx);
+
+  // Update tax percent
+  const updateTaxTx = factoryBuilder.buildUpdateTaxPercent(
+    deployFactoryResponse.contract_address as ContractAddress,
+    300,
+    FACTORY_FILENAME
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, updateTaxTx);
+
+  // Update timeout
+  const updateTimeoutTx = factoryBuilder.buildUpdateTimeout(
+    deployFactoryResponse.contract_address as ContractAddress,
+    7200,
+    FACTORY_FILENAME
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, updateTimeoutTx);
+
+  // // Pause the factory
+  // const setPausedTx = factoryBuilder.buildSetPaused(
+  //   deployFactoryResponse.contract_address as ContractAddress,
+  //   true,
   //   FACTORY_FILENAME
   // );
+  // await factoryBuilder.sendTransaction(factoryAccount, setPausedTx);
 
-  // // Execute the deployment transaction
-  // let deployTxHash;
-  // try {
-  //   deployTxHash = await factoryBuilder.sendTransaction(
-  //     factoryAccount,
-  //     deployCall
-  //   );
-  // } catch (error: any) {
-  //   throw new Error(`Failed to deploy contract: ${error.message}`);
-  // }
-
-  // initialize factory
-  // const initializeedTx = await factoryBuilder.buildInitializeFactoryTransaction(
-  //   "0x6ca112f6ee51d5d6fbd567d8a9dad0f9567bb82eb7eaa75ec8c68a69ba37942" as ContractAddress,
-  //   FACTORY_FILENAME,
-  //   {
-  //     feePercent: 500,
-  //     taxPercent: 200,
-  //     timeout: 3600,
-  //   }
-  // );
-
-  // const receipt = await factoryBuilder.sendTransaction(
-  //   factoryAccount,
-  //   initializeedTx
-  // );
-
-  let shouldCancel = false;
-
-  await factoryBuilder.monitorEvents(
-    "0x6ca112f6ee51d5d6fbd567d8a9dad0f9567bb82eb7eaa75ec8c68a69ba37942",
-    ["FactoryInitialized"],
-    async (eventData) => {
-      console.log("New event:", eventData.event.type, eventData.event.data);
-      console.log("Metadata:", eventData.metadata);
-    },
-    5000,
-    factoryContractPath,
-    () => shouldCancel
+  // Query factory state
+  const treasury = await factoryBuilder.getTreasury(
+    deployFactoryResponse.contract_address as ContractAddress,
+    FACTORY_FILENAME
   );
+  const feePercent = await factoryBuilder.getFeePercent(
+    deployFactoryResponse.contract_address as ContractAddress,
+    FACTORY_FILENAME
+  );
+  const taxPercent = await factoryBuilder.getTaxPercent(
+    deployFactoryResponse.contract_address as ContractAddress,
+    FACTORY_FILENAME
+  );
+  const timeout = await factoryBuilder.getTimeout(
+    deployFactoryResponse.contract_address as ContractAddress,
+    FACTORY_FILENAME
+  );
+  const isSupported = await factoryBuilder.isSupportedToken(
+    deployFactoryResponse.contract_address as ContractAddress,
+    tokenAddress,
+    FACTORY_FILENAME
+  );
+
+  console.log("Factory parameters updated:", {
+    treasury,
+    feePercent,
+    taxPercent,
+    timeout,
+    isSupported,
+  });
+
+  return; //[x] remove the run the pos simulation
+
+  // ============================================================
+  // POS CREATION & MONITORING
+  // ------------------------------------------------------------
+  // Creates a POS instance via the factory, listens for the
+  // POSCreated event, and logs the deployed POS address.
+  // ============================================================
+
+  const posArgs: POSConstructorArgs = {
+    owner: FACTORY_ACCOUNT_ADDRESS,
+    treasury: FACTORY_ACCOUNT_ADDRESS,
+    fee_percent: 500,
+    tax_percent: 200,
+    timeout: 86400,
+    factory_address: deployFactoryResponse.contract_address as ContractAddress,
+  };
+
+  const createPosTx = await factoryBuilder.buildCreatePOS(
+    FACTORY_FILENAME,
+    posArgs.factory_address as ContractAddress,
+    posArgs.owner,
+    posClassHash
+  );
+
+  const posTxReceipt = await factoryAccount.execute(createPosTx);
+  await factoryAccount.waitForTransaction(posTxReceipt.transaction_hash);
+
+  // Wait for the POSCreated event
+  const posAddress = await new Promise<string>((resolve) => {
+    let shouldCancel = false;
+    factoryBuilder.monitorEvents(
+      deployFactoryResponse.contract_address,
+      ["POSCreated"],
+      async (eventData: any) => {
+        const pos_address = eventData.event.data.pos_address;
+        shouldCancel = true;
+        resolve(pos_address);
+      },
+      1000,
+      factoryContractPath,
+      () => shouldCancel
+    );
+  });
+
+  console.log("Deployed POS Address:", posAddress);
+
+  const posBuilder = new ThellexPOSBuilder(factoryBuilder);
+
+  // --- Deposit ---
+  const depositTx = posBuilder.buildDeposit(
+    posAddress as ContractAddress,
+    "1000",
+    "tx001",
+    tokenAddress
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, depositTx);
+  console.log("✅ Deposit submitted.");
+
+  // --- Approve transaction ---
+  const approveTx = posBuilder.buildApproveTransaction(
+    posAddress as ContractAddress,
+    "tx001"
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, approveTx);
+  console.log("✅ Transaction approved.");
+
+  // --- Reject transaction ---
+  const rejectTx = posBuilder.buildRejectTransaction(
+    posAddress as ContractAddress,
+    "tx002"
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, rejectTx);
+  console.log("✅ Transaction rejected.");
+
+  // --- Auto refund ---
+  const refundTx = posBuilder.buildAutoRefund(
+    posAddress as ContractAddress,
+    "tx001",
+    FACTORY_ACCOUNT_ADDRESS
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, refundTx);
+  // console.log("✅ Refund processed.");
+
+  // --- Withdraw funds ---
+  const withdrawTx = posBuilder.buildWithdraw(
+    posAddress as ContractAddress,
+    FACTORY_ACCOUNT_ADDRESS,
+    "500",
+    tokenAddress
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, withdrawTx);
+  console.log("✅ Funds withdrawn.");
 }
 
 main().catch(console.error);

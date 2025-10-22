@@ -23,3 +23,12 @@ export interface BaseBuilderConfigArgs {
   factoryContractPath?: string;
   udcAddress: ContractAddress;
 }
+
+export interface POSConstructorArgs {
+  owner: ContractAddress;
+  treasury: string;
+  fee_percent: number;
+  tax_percent: number;
+  timeout: number;
+  factory_address: ContractAddress;
+}

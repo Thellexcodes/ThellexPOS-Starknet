@@ -20,6 +20,7 @@ import {
 import { BaseBuilderConfigArgs, ContractAddress } from "../types";
 
 export abstract class BaseBuilder {
+  protected config: BaseBuilderConfigArgs;
   protected provider: Provider;
   protected contracts: Map<string, Contract> = new Map();
   public contractsPath: string;
@@ -29,6 +30,7 @@ export abstract class BaseBuilder {
   public udcAddress: ContractAddress;
 
   constructor(config: BaseBuilderConfigArgs) {
+    this.config = config;
     this.provider = new RpcProvider({ nodeUrl: config.nodeUrl });
     this.contractsPath = config.contractsPath;
     this.treasuryAddress = config.treasuryAddress;
@@ -43,7 +45,7 @@ export abstract class BaseBuilder {
   /**
    * Loads a contract ABI and caches it for reuse.
    */
-  protected getContract(address: string, abiPath: string): Contract {
+  getContract(address: string, abiPath: string): Contract {
     if (this.contracts.has(address)) {
       return this.contracts.get(address)!;
     }
@@ -182,20 +184,30 @@ export abstract class BaseBuilder {
                 )
                   continue;
 
-                // Filter and decode only the events requested
+                // Filter only requested events
                 const eventAbi = (contract.abi as any)
                   .filter((entry: any) => entry.type === "event")
                   .find((e: any) =>
                     eventNames.some((name) => e.name.endsWith(name))
                   );
-
                 if (!eventAbi) continue;
 
                 const decoded: Record<string, any> = {};
+
+                // Decode key fields
+                if (rawEvent.keys && rawEvent.keys.length > 0) {
+                  eventAbi.members?.forEach((field: any, idx: number) => {
+                    if (field.key) {
+                      decoded[field.name] = rawEvent.keys[idx];
+                    }
+                  });
+                }
+
+                // Decode data fields (non-key)
                 rawEvent.data.forEach((val: string, idx: number) => {
                   const field =
                     eventAbi.members?.[idx] || eventAbi.inputs?.[idx];
-                  if (!field) return;
+                  if (!field || field.key) return; // skip key fields here
                   const name = field.name;
 
                   if (
@@ -237,4 +249,130 @@ export abstract class BaseBuilder {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
   }
+
+  // async monitorEvents<T extends ThellexFactoryEvent | ThellexPOSEvent>(
+  //   contractAddress: string,
+  //   eventNames: T["type"][],
+  //   callback: (eventData: EventCallbackData) => Promise<void>,
+  //   pollInterval = 5000,
+  //   abiFilePath?: string,
+  //   cancelToken?: () => boolean
+  // ): Promise<void> {
+  //   // Load the contract ABI
+  //   let contract: Contract;
+  //   if (this.contracts.has(contractAddress)) {
+  //     contract = this.contracts.get(contractAddress)!;
+  //   } else if (abiFilePath) {
+  //     if (!fs.existsSync(abiFilePath)) {
+  //       throw new Error(`ABI file not found at ${abiFilePath}`);
+  //     }
+  //     const contractArtifact = JSON.parse(
+  //       fs.readFileSync(abiFilePath, "utf-8")
+  //     );
+  //     const contractAbi = contractArtifact.abi;
+  //     contract = new Contract(contractAbi, contractAddress, this.provider);
+  //     this.contracts.set(contractAddress, contract);
+  //   } else {
+  //     throw new Error("ABI file path required for new contract monitoring");
+  //   }
+
+  //   let lastBlockNumber: number | null = null;
+
+  //   while (true) {
+  //     if (cancelToken && cancelToken()) {
+  //       console.log("Event monitoring cancelled");
+  //       break;
+  //     }
+
+  //     try {
+  //       const latestBlock = await this.provider.getBlock("latest");
+  //       const currentBlockNumber = latestBlock.block_number;
+  //       const blockTimestamp = latestBlock.timestamp;
+
+  //       if (lastBlockNumber === null) lastBlockNumber = currentBlockNumber - 1;
+
+  //       if (currentBlockNumber > lastBlockNumber) {
+  //         for (
+  //           let blockNum = lastBlockNumber + 1;
+  //           blockNum <= currentBlockNumber;
+  //           blockNum++
+  //         ) {
+  //           const block = await this.provider.getBlock(blockNum);
+  //           const txReceipts: any[] = await Promise.all(
+  //             block.transactions.map((txHash: string) =>
+  //               this.provider.getTransactionReceipt(txHash)
+  //             )
+  //           );
+
+  //           for (const receipt of txReceipts) {
+  //             if (!receipt.events || receipt.events.length === 0) continue;
+
+  //             for (
+  //               let eventIndex = 0;
+  //               eventIndex < receipt.events.length;
+  //               eventIndex++
+  //             ) {
+  //               const rawEvent = receipt.events[eventIndex];
+
+  //               if (
+  //                 rawEvent.from_address.toLowerCase() !==
+  //                 contractAddress.toLowerCase()
+  //               )
+  //                 continue;
+
+  //               // Filter and decode only the events requested
+  //               const eventAbi = (contract.abi as any)
+  //                 .filter((entry: any) => entry.type === "event")
+  //                 .find((e: any) =>
+  //                   eventNames.some((name) => e.name.endsWith(name))
+  //                 );
+
+  //               if (!eventAbi) continue;
+
+  //               const decoded: Record<string, any> = {};
+  //               rawEvent.data.forEach((val: string, idx: number) => {
+  //                 const field =
+  //                   eventAbi.members?.[idx] || eventAbi.inputs?.[idx];
+  //                 if (!field) return;
+  //                 const name = field.name;
+
+  //                 if (
+  //                   field.type === "core::integer::u256" ||
+  //                   field.type?.startsWith("Uint256")
+  //                 ) {
+  //                   decoded[name] = uint256.uint256ToBN({
+  //                     low: BigInt(val),
+  //                     high: BigInt(0),
+  //                   });
+  //                 } else {
+  //                   decoded[name] = val;
+  //                 }
+  //               });
+
+  //               await callback({
+  //                 event: {
+  //                   type: eventAbi.name.split("::").pop()!,
+  //                   data: decoded as any,
+  //                 },
+  //                 metadata: {
+  //                   transactionHash: receipt.transaction_hash,
+  //                   blockNumber: receipt.block_number,
+  //                   blockTimestamp,
+  //                   eventIndex,
+  //                 },
+  //               });
+  //             }
+  //           }
+  //         }
+  //         lastBlockNumber = currentBlockNumber;
+  //       }
+  //     } catch (err: any) {
+  //       console.error(
+  //         `Error monitoring events for ${contractAddress}: ${err.message}`
+  //       );
+  //     }
+
+  //     await new Promise((resolve) => setTimeout(resolve, pollInterval));
+  //   }
+  // }
 }

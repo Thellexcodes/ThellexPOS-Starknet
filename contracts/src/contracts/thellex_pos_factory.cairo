@@ -92,18 +92,15 @@ use starknet::get_contract_address;
       fn create_pos(
           ref self: ContractState, 
           owner: ContractAddress, 
-          deposit_address: ContractAddress, 
           pos_class_hash: ClassHash,
         ) -> ContractAddress {
           assert(self.initialized.read(), 'Not initialized');
           assert(!self.paused.read(), 'Factory paused');
           assert(owner.is_non_zero(), 'Invalid owner');
-          assert(deposit_address.is_non_zero(), 'Invalid deposit address');
 
           // Deploy ThellexPOSV1 instance
           let mut calldata = ArrayTrait::new();
           calldata.append(owner.into());
-          calldata.append(deposit_address.into());
           calldata.append(self.treasury.read().into());
           calldata.append(self.fee_percent.read().low.into());
           calldata.append(self.fee_percent.read().high.into());
@@ -122,34 +119,34 @@ use starknet::get_contract_address;
       fn update_treasury(ref self: ContractState, new_treasury: ContractAddress) {
           assert(self.initialized.read(), 'Not initialized');
           assert(new_treasury.is_non_zero(), 'Invalid treasury address');
-          assert(get_caller_address() == self.treasury.read(), 'Unauthorized');
+          assert(self.admins.read(get_caller_address()), 'Unauthorized');
           self.treasury.write(new_treasury);
       }
 
       fn update_fee_percent(ref self: ContractState, new_fee_percent: u256) {
           assert(self.initialized.read(), 'Not initialized');
-          assert(get_caller_address() == self.treasury.read(), 'Unauthorized');
+          assert(self.admins.read(get_caller_address()), 'Unauthorized');
           assert(new_fee_percent <= 10000, 'Fee percent too high');
           self.fee_percent.write(new_fee_percent);
       }
 
       fn update_tax_percent(ref self: ContractState, new_tax_percent: u256) {
           assert(self.initialized.read(), 'Not initialized');
-          assert(get_caller_address() == self.treasury.read(), 'Unauthorized');
+          assert(self.admins.read(get_caller_address()), 'Unauthorized');
           assert(new_tax_percent <= 10000, 'Tax percent too high');
           self.tax_percent.write(new_tax_percent);
       }
 
       fn update_timeout(ref self: ContractState, new_timeout: u64) {
           assert(self.initialized.read(), 'Not initialized');
-          assert(get_caller_address() == self.treasury.read(), 'Unauthorized');
+          assert(self.admins.read(get_caller_address()), 'Unauthorized');
           assert(new_timeout > 0, 'Invalid timeout');
           self.timeout.write(new_timeout);
       }
 
       fn set_paused(ref self: ContractState, paused: bool) {
           assert(self.initialized.read(), 'Not initialized');
-          assert(get_caller_address() == self.treasury.read(), 'Unauthorized');
+          assert(self.admins.read(get_caller_address()), 'Unauthorized');
           self.paused.write(paused);
       }
 

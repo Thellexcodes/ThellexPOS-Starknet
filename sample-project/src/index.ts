@@ -1,5 +1,4 @@
 import {
-  BaseBuilderConfigArgs,
   ContractAddress,
   POSConstructorArgs,
   ThellexPOSBuilder,
@@ -180,7 +179,7 @@ async function main() {
     FACTORY_FILENAME
   );
 
-  console.log("🏭 Factory parameters updated:", {
+  console.log("Factory parameters updated:", {
     treasury,
     feePercent,
     taxPercent,
@@ -188,8 +187,10 @@ async function main() {
     isSupported,
   });
 
+  return; //[x] remove the run the pos simulation
+
   // ============================================================
-  // 💳 POS CREATION & MONITORING
+  // POS CREATION & MONITORING
   // ------------------------------------------------------------
   // Creates a POS instance via the factory, listens for the
   // POSCreated event, and logs the deployed POS address.
@@ -232,6 +233,53 @@ async function main() {
   });
 
   console.log("Deployed POS Address:", posAddress);
+
+  const posBuilder = new ThellexPOSBuilder(factoryBuilder);
+
+  // --- Deposit ---
+  const depositTx = posBuilder.buildDeposit(
+    posAddress as ContractAddress,
+    "1000",
+    "tx001",
+    tokenAddress
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, depositTx);
+  console.log("✅ Deposit submitted.");
+
+  // --- Approve transaction ---
+  const approveTx = posBuilder.buildApproveTransaction(
+    posAddress as ContractAddress,
+    "tx001"
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, approveTx);
+  console.log("✅ Transaction approved.");
+
+  // --- Reject transaction ---
+  const rejectTx = posBuilder.buildRejectTransaction(
+    posAddress as ContractAddress,
+    "tx002"
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, rejectTx);
+  console.log("✅ Transaction rejected.");
+
+  // --- Auto refund ---
+  const refundTx = posBuilder.buildAutoRefund(
+    posAddress as ContractAddress,
+    "tx001",
+    FACTORY_ACCOUNT_ADDRESS
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, refundTx);
+  // console.log("✅ Refund processed.");
+
+  // --- Withdraw funds ---
+  const withdrawTx = posBuilder.buildWithdraw(
+    posAddress as ContractAddress,
+    FACTORY_ACCOUNT_ADDRESS,
+    "500",
+    tokenAddress
+  );
+  await factoryBuilder.sendTransaction(factoryAccount, withdrawTx);
+  console.log("✅ Funds withdrawn.");
 }
 
 main().catch(console.error);

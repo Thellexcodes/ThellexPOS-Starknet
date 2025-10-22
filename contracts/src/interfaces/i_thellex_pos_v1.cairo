@@ -17,9 +17,7 @@ pub enum ThellexPOSEvent {
 
 #[derive(Drop, starknet::Event)]
 pub struct Initialized {
-    #[key]
     pub owner: ContractAddress,
-    pub deposit_address: ContractAddress,
     pub treasury: ContractAddress,
     pub fee_percent: u256,
     pub tax_percent: u256,
@@ -37,15 +35,13 @@ pub struct PaymentReceived {
 
 #[derive(Drop, starknet::Event)]
 pub struct BalanceCredited {
-    #[key]
-    pub merchant: ContractAddress,
+    // pub merchant: ContractAddress,
     pub amount: u256,
     pub token: ContractAddress,
 }
 
 #[derive(Drop, starknet::Event)]
 pub struct PaymentRejected {
-    #[key]
     pub sender: ContractAddress,
     pub amount: u256,
     pub token: ContractAddress,
@@ -54,7 +50,6 @@ pub struct PaymentRejected {
 
 #[derive(Drop, starknet::Event)]
 pub struct AutoRefunded {
-    #[key]
     pub sender: ContractAddress,
     pub amount: u256,
     pub tax: u256,
@@ -64,7 +59,6 @@ pub struct AutoRefunded {
 
 #[derive(Drop, starknet::Event)]
 pub struct WithdrawalExecuted {
-    #[key]
     pub recipient: ContractAddress,
     pub amount: u256,
     pub token: ContractAddress,
@@ -80,16 +74,14 @@ pub struct PaymentRequest {
 
 #[derive(Drop, starknet::Event)]
 pub struct PaymentRequestCreated {
-    #[key]
     pub request_id: felt252,
     pub requester: ContractAddress,
     pub amount: u256,
     pub token: ContractAddress,
 }
 
-    #[derive(Drop, starknet::Event)]
+#[derive(Drop, starknet::Event)]
 pub struct PaymentRequestFulfilled {
-    #[key]
     pub request_id: felt252,
     pub sender: ContractAddress,
     pub amount: u256,
@@ -98,7 +90,6 @@ pub struct PaymentRequestFulfilled {
 
 #[derive(Drop, starknet::Event)]
 pub struct ExternalDepositRegistered {
-    #[key]
     pub sender: ContractAddress,
     pub amount: u256,
     pub token: ContractAddress,
@@ -120,7 +111,6 @@ pub trait IThellexPOSV1<TContractState> {
     fn initialize(
         ref self: TContractState,
         owner: ContractAddress,
-        deposit_address: ContractAddress,
         treasury: ContractAddress,
         fee_percent: u256,
         tax_percent: u256,

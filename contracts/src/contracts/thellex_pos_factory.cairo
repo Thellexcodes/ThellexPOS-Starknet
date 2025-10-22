@@ -92,18 +92,15 @@ use starknet::get_contract_address;
       fn create_pos(
           ref self: ContractState, 
           owner: ContractAddress, 
-          deposit_address: ContractAddress, 
           pos_class_hash: ClassHash,
         ) -> ContractAddress {
           assert(self.initialized.read(), 'Not initialized');
           assert(!self.paused.read(), 'Factory paused');
           assert(owner.is_non_zero(), 'Invalid owner');
-          assert(deposit_address.is_non_zero(), 'Invalid deposit address');
 
           // Deploy ThellexPOSV1 instance
           let mut calldata = ArrayTrait::new();
           calldata.append(owner.into());
-          calldata.append(deposit_address.into());
           calldata.append(self.treasury.read().into());
           calldata.append(self.fee_percent.read().low.into());
           calldata.append(self.fee_percent.read().high.into());

@@ -37,7 +37,6 @@ pub mod ThellexPOSV1 {
     #[storage]
     struct Storage {
         owner: ContractAddress,
-        deposit_address: ContractAddress,
         treasury: ContractAddress,
         fee_percent: u256,
         tax_percent: u256,
@@ -79,14 +78,13 @@ pub mod ThellexPOSV1 {
     fn constructor(
         ref self: ContractState,
         owner: ContractAddress,
-        deposit_address: ContractAddress,
         treasury: ContractAddress,
         fee_percent: u256,
         tax_percent: u256,
         timeout: u64,
         factory_address: ContractAddress
     ) {
-        self.initialize(owner, deposit_address, treasury, fee_percent, tax_percent, timeout, factory_address);
+        self.initialize(owner, treasury, fee_percent, tax_percent, timeout, factory_address);
     }
 
     #[abi(embed_v0)]
@@ -94,7 +92,6 @@ pub mod ThellexPOSV1 {
         fn initialize(
             ref self: ContractState,
             owner: ContractAddress,
-            deposit_address: ContractAddress,
             treasury: ContractAddress,
             fee_percent: u256,
             tax_percent: u256,
@@ -103,14 +100,12 @@ pub mod ThellexPOSV1 {
         ) {
             assert(!self.initialized.read(), 'Already initialized');
             assert(owner.is_non_zero(), 'Invalid owner');
-            assert(deposit_address.is_non_zero(), 'Invalid deposit address');
             assert(treasury.is_non_zero(), 'Invalid treasury');
             assert(fee_percent <= 10000, 'Fee percent too high');
             assert(tax_percent <= 10000, 'Tax percent too high');
             assert(timeout > 0, 'Invalid timeout');
 
             self.owner.write(owner);
-            self.deposit_address.write(deposit_address);
             self.treasury.write(treasury);
             self.fee_percent.write(fee_percent);
             self.tax_percent.write(tax_percent);
@@ -122,7 +117,6 @@ pub mod ThellexPOSV1 {
             self.emit(Event::Initialized (
                 Initialized{
                   owner,
-                  deposit_address,
                   treasury,
                   fee_percent,
                   tax_percent,
@@ -212,7 +206,7 @@ pub mod ThellexPOSV1 {
             self.rejection_count.write(self.owner.read(), 0);
 
             self.emit(Event::BalanceCredited(BalanceCredited {
-                merchant: self.deposit_address.read(),
+                // merchant: get_contract_address().into(),
                 amount: net_amount,
                 token
             }));
@@ -378,7 +372,6 @@ pub mod ThellexPOSV1 {
                 PaymentRequestFulfilled { request_id, sender, amount, token }
             ));
             self.emit(Event::BalanceCredited(BalanceCredited {
-                merchant: self.deposit_address.read(),
                 amount: net_amount,
                 token
             }));

@@ -25,11 +25,10 @@ export interface BaseBuilderConfigArgs {
 }
 
 export interface POSConstructorArgs {
-  owner: string;
-  deposit_address: string;
+  owner: ContractAddress;
   treasury: string;
   fee_percent: number;
   tax_percent: number;
   timeout: number;
-  factory_address: string;
+  factory_address: ContractAddress;
 }

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { Call, CallData, Contract, uint256 } from "starknet";
+import { Call, CallData, Contract, Result, uint256 } from "starknet";
 import { BaseBuilder } from "../core/BaseBuilder";
 import { ContractAddress, FactoryInitializeArgs } from "../types";
 import { AbstractThellexPOSFactory } from "./abstracts/ThellexPOSFactory";
@@ -9,16 +9,11 @@ export class ThellexPOSFactoryBuilder
   extends BaseBuilder
   implements AbstractThellexPOSFactory
 {
-  /**
-   * Builds a deployment call for a contract.
-   * @param contractPath Relative path to the compiled contract JSON file (relative to contractsPath).
-   * @param constructorArgs Optional arguments for the contract constructor.
-   * @returns A Call object that can be signed and executed.
-   */
+  // Build deployment for factory contract
   async buildFactoryDeployment(
     contractPath: string,
     constructorArgs: any[] = []
-  ) {
+  ): Promise<Call> {
     const fullPath = path.join(this.contractsPath, contractPath);
 
     if (!fs.existsSync(fullPath)) {
@@ -28,117 +23,208 @@ export class ThellexPOSFactoryBuilder
     const contractJson = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
     const classHash = this.computeClassHash(fullPath);
 
-    // Build the constructor calldata
     const callData = new CallData(contractJson.abi);
     const constructorCalldata = callData.compile(
       "constructor",
       constructorArgs
     );
 
-    const call: Call = {
-      contractAddress: "0x1",
+    return {
+      contractAddress: "0x1", // deploy to system address
       entrypoint: "deploy_contract",
       calldata: [classHash, ...constructorCalldata],
     };
-
-    return call;
   }
 
-  /**
-   * Builds the initialize transaction for the factory contract without sending it.
-   * Returns a transaction object that can later be signed and sent.
-   */
+  // Initialize factory
   async buildInitializeFactoryTransaction(
     factoryAddress: ContractAddress,
     abiPath: string,
     initArgs: FactoryInitializeArgs
   ): Promise<Call> {
-    // Destructure input args
     const { feePercent, taxPercent, timeout } = initArgs;
-
-    // Get the contract instance
     const contract = this.getContract(
       factoryAddress,
       `${this.contractsPath}/${abiPath}`
     );
 
-    // Convert fee and tax to uint256 format if needed
     const feeUint256 = uint256.bnToUint256(feePercent);
     const taxUint256 = uint256.bnToUint256(taxPercent);
 
-    // Build the initialize transaction call
-    const tx: Call = contract.populate("initialize", [
+    return contract.populate("initialize", [
       this.treasuryAddress,
       feeUint256,
       taxUint256,
       timeout,
     ]);
-
-    return tx;
   }
 
-  buildInitialize(): Call {
-    throw new Error("Method not implemented.");
-  }
-  buildAddSupportedToken(token: ContractAddress): Call {
-    throw new Error("Method not implemented.");
-  }
-  buildRemoveSupportedToken(token: ContractAddress): Call {
-    throw new Error("Method not implemented.");
-  }
-  buildCreatePOS(
-    factoryAddress: ContractAddress,
+  // Create POS
+  async buildCreatePOS(
     abiPath: string,
+    factoryAddress: ContractAddress,
     owner: ContractAddress,
     posClassHash: string
+  ): Promise<Call> {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    return contract.populate("create_pos", [owner, posClassHash]);
+  }
+
+  // Add a supported token
+  buildAddSupportedToken(
+    factoryAddress: ContractAddress,
+    token: ContractAddress,
+    abiPath: string
   ): Call {
     const contract = this.getContract(
       factoryAddress,
       `${this.contractsPath}/${abiPath}`
     );
-    const tx: Call = contract.populate("create_pos", [
-      owner,
-      this.treasuryAddress,
-      posClassHash,
-    ]);
-    return tx;
+    return contract.populate("add_supported_token", [token]);
   }
-  // async buildCreatePOS(
-  //   factoryAddress: ContractAddress,
-  //   abiPath: string,
-  //   owner: ContractAddress,
-  //   posClassHash: string
-  // ): Promise<Call> {
 
-  // }
-  buildUpdateTreasury(newTreasury: ContractAddress): Call {
-    throw new Error("Method not implemented.");
+  // Remove a supported token
+  buildRemoveSupportedToken(
+    factoryAddress: ContractAddress,
+    token: ContractAddress,
+    abiPath: string
+  ): Call {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    return contract.populate("remove_supported_token", [token]);
   }
-  buildUpdateFeePercent(newFeePercent: string): Call {
-    throw new Error("Method not implemented.");
+
+  // Update treasury address
+  buildUpdateTreasury(
+    factoryAddress: ContractAddress,
+    newTreasury: ContractAddress,
+    abiPath: string
+  ): Call {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    return contract.populate("update_treasury", [newTreasury]);
   }
-  buildUpdateTaxPercent(newTaxPercent: string): Call {
-    throw new Error("Method not implemented.");
+
+  // Update fee percent
+  buildUpdateFeePercent(
+    factoryAddress: ContractAddress,
+    newFeePercent: number,
+    abiPath: string
+  ): Call {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    const feeUint256 = uint256.bnToUint256(newFeePercent);
+    return contract.populate("update_fee_percent", [feeUint256]);
   }
-  buildUpdateTimeout(newTimeout: string): Call {
-    throw new Error("Method not implemented.");
+
+  // Update tax percent
+  buildUpdateTaxPercent(
+    factoryAddress: ContractAddress,
+    newTaxPercent: number,
+    abiPath: string
+  ): Call {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    const taxUint256 = uint256.bnToUint256(newTaxPercent);
+    return contract.populate("update_tax_percent", [taxUint256]);
   }
-  buildSetPaused(paused: boolean): Call {
-    throw new Error("Method not implemented.");
+
+  // Update timeout
+  buildUpdateTimeout(
+    factoryAddress: ContractAddress,
+    newTimeout: number,
+    abiPath: string
+  ): Call {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    return contract.populate("update_timeout", [newTimeout]);
   }
-  getTreasury(): Promise<ContractAddress> {
-    throw new Error("Method not implemented.");
+
+  // Pause/unpause factory
+  buildSetPaused(
+    factoryAddress: ContractAddress,
+    paused: boolean,
+    abiPath: string
+  ): Call {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    return contract.populate("set_paused", [paused]);
   }
-  getFeePercent(): Promise<string> {
-    throw new Error("Method not implemented.");
+
+  // Query functions
+  async getTreasury(
+    factoryAddress: ContractAddress,
+    abiPath: string
+  ): Promise<ContractAddress> {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    const res = await contract.call("get_treasury");
+    return "0x";
   }
-  getTaxPercent(): Promise<string> {
-    throw new Error("Method not implemented.");
+
+  async getFeePercent(
+    factoryAddress: ContractAddress,
+    abiPath: string
+  ): Promise<number> {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    const res = await contract.call("get_fee_percent");
+    return 1;
   }
-  getTimeout(): Promise<string> {
-    throw new Error("Method not implemented.");
+
+  async getTaxPercent(
+    factoryAddress: ContractAddress,
+    abiPath: string
+  ): Promise<number> {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    const res = await contract.call("get_tax_percent");
+    return 1;
   }
-  isSupportedToken(token: ContractAddress): Promise<boolean> {
-    throw new Error("Method not implemented.");
+
+  async getTimeout(
+    factoryAddress: ContractAddress,
+    abiPath: string
+  ): Promise<Result> {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    const res = await contract.call("get_timeout");
+    return res;
+  }
+
+  async isSupportedToken(
+    factoryAddress: ContractAddress,
+    token: ContractAddress,
+    abiPath: string
+  ): Promise<boolean> {
+    const contract = this.getContract(
+      factoryAddress,
+      `${this.contractsPath}/${abiPath}`
+    );
+    const res = await contract.call("is_supported_token", [token]);
+    return true;
   }
 }

@@ -280,6 +280,29 @@ async function main() {
   );
   await factoryBuilder.sendTransaction(factoryAccount, withdrawTx);
   console.log("✅ Funds withdrawn.");
+
+  // Get deposit details
+  // const deposit = await posBuilder.getDeposit(posAddress, "tx001");
+  // console.log("Deposit details:", deposit);
+
+  // // Get POS balance
+  // const balance = await posBuilder.getPOSBalance(posAddress, tokenAddress);
+  // console.log("POS balance:", balance);
+
+  // // Get owner
+  // const owner = await posBuilder.getOwner(posAddress);
+  // console.log("POS owner:", owner);
+
+  // // Get treasury
+  // const treasury = await posBuilder.getTreasury(posAddress);
+  // console.log("POS treasury:", treasury);
+
+  // // Check supported token
+  // const isSupported = await posBuilder.isSupportedToken(
+  //   posAddress,
+  //   tokenAddress
+  // );
+  console.log("Is token supported:", isSupported);
 }
 
 main().catch(console.error);

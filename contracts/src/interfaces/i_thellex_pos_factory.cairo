@@ -37,7 +37,8 @@ pub trait IThellexPOSFactory<TContractState> {
         treasury: ContractAddress,
         fee_percent: u256,
         tax_percent: u256,
-        timeout: u64
+        timeout: u64,
+        min_withdrawal_limit: u256
     );
 
     // Deploy a new ThellexPOSV1 contract for a merchant
@@ -82,4 +83,8 @@ pub trait IThellexPOSFactory<TContractState> {
         self: @TContractState,
         token: ContractAddress
     ) -> bool;
+
+    fn update_min_withdrawal_limit(ref self: TContractState, new_limit: u256);
+
+    fn get_min_withdrawal_limit(ref self: TContractState) -> u256;
 }

@@ -115,6 +115,7 @@ pub trait IThellexPOSV1<TContractState> {
         fee_percent: u256,
         tax_percent: u256,
         timeout: u64,
+        min_withdrawal_limit: u256,
         factory_address: ContractAddress
     );
 
@@ -189,4 +190,6 @@ pub trait IThellexPOSV1<TContractState> {
         amount: u256,
         token: ContractAddress
     );
+
+    fn get_min_withdrawal_limit(ref self: TContractState) -> u256;
 }

@@ -5,7 +5,8 @@ use thellexpos::interfaces::i_thellex_pos_v1::IThellexPOSV1;
 
 #[starknet::contract]
 pub mod ThellexPOSV1 {
-    use crate::contracts::erc20::ERC20::IERC20Dispatcher;
+    use crate::contracts::erc20::ERC20::IERC20DispatcherTrait;
+use crate::contracts::erc20::ERC20::IERC20Dispatcher;
     use crate::interfaces::i_thellex_pos_factory::{
         IThellexPOSFactoryDispatcherTrait, 
         IThellexPOSFactoryDispatcher
@@ -57,6 +58,7 @@ pub mod ThellexPOSV1 {
         factory: ContractAddress, 
         rejection_count: Map<ContractAddress, u8>,
         payment_requests: Map<felt252, PaymentRequest>,
+        min_withdrawal_limit: u256, 
     }
 
     #[event]
@@ -82,9 +84,10 @@ pub mod ThellexPOSV1 {
         fee_percent: u256,
         tax_percent: u256,
         timeout: u64,
+        min_withdrawal_limit: u256,
         factory_address: ContractAddress
     ) {
-        self.initialize(owner, treasury, fee_percent, tax_percent, timeout, factory_address);
+        self.initialize(owner, treasury, fee_percent, tax_percent, timeout, min_withdrawal_limit, factory_address);
     }
 
     #[abi(embed_v0)]
@@ -96,6 +99,7 @@ pub mod ThellexPOSV1 {
             fee_percent: u256,
             tax_percent: u256,
             timeout: u64,
+            min_withdrawal_limit: u256,
             factory_address: ContractAddress
         ) {
             assert(!self.initialized.read(), 'Already initialized');
@@ -111,6 +115,7 @@ pub mod ThellexPOSV1 {
             self.tax_percent.write(tax_percent);
             self.timeout.write(timeout);
             self.admins.write(owner, true); 
+            self.min_withdrawal_limit.write(min_withdrawal_limit);
             self.initialized.write(true);
             self.factory.write(factory_address);
 
@@ -227,8 +232,7 @@ pub mod ThellexPOSV1 {
             assert(sender.is_non_zero(), 'Invalid refund address');
 
             let erc20 = IERC20Dispatcher { contract_address: token };
-            // erc20.transfer(sendedr, amount);
-
+            erc20.transfer(sender, amount);
 
             self.deposits.write(tx_id, 0);
             self.deposit_senders.write(tx_id, contract_address_const::<0>());
@@ -267,12 +271,11 @@ pub mod ThellexPOSV1 {
             let tax = amount * self.tax_percent.read() / 10000;
             let refund_amount = amount - tax;
 
-            // let transfer_result = IERC20Dispatcher { contract_address: token }
-            //     .transfer(refund_receiver, refund_amount);
+            let transfer_result = IERC20Dispatcher { contract_address: token }
+                .transfer(refund_receiver, refund_amount);
 
             // assert(transfer_result.is_ok(), 'Refund transfer failed');
 
-            // 🧾 Clear deposit state
             self.deposits.write(tx_id, 0);
             self.deposit_senders.write(tx_id, contract_address_const::<0>());
             self.deposit_tokens.write(tx_id, contract_address_const::<0>());
@@ -379,6 +382,7 @@ pub mod ThellexPOSV1 {
             assert(!self.paused.read(), 'Contract paused');
             assert(self.admins.read(get_caller_address()), 'Unauthorized');
             assert(amount > 0, 'Invalid amount');
+            assert(amount >= self.min_withdrawal_limit.read(), 'Below min withdrawal limit');
             assert(recipient.is_non_zero(), 'Invalid recipient');
             assert(token.is_non_zero(), 'Invalid token');
             assert(self.balances.read(token) >= amount, 'Insufficient balance');
@@ -426,6 +430,10 @@ pub mod ThellexPOSV1 {
 
         fn balances(self: @ContractState, token: ContractAddress) -> u256 {
             self.balances.read(token)
+        }
+
+        fn get_min_withdrawal_limit(ref self: ContractState) -> u256 {
+            self.min_withdrawal_limit.read()
         }
     }
 }

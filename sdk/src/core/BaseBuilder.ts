@@ -4,33 +4,46 @@ import {
   Account,
   hash,
   Provider,
-  json,
   Call,
   TransactionStatusReceiptSets,
   GetTransactionReceiptResponse,
-  uint256,
+  WebSocketChannel,
+  num,
+  events,
+  CallData,
 } from "starknet";
 import fs from "fs";
 import { join } from "path";
+import { POSEvent, EventName } from "../types/events";
+import { Utils } from "../utils/utils";
 import {
-  EventCallbackData,
-  FactoryEvent,
-  StoreEvent,
-  POSEvent,
-  EventName,
-} from "../types/events";
-import { BaseBuilderConfigArgs, ContractAddress } from "../types";
+  BaseBuilderConfigArgs,
+  ContractAddress,
+  MonitorEventsOptions,
+} from "../types";
 
 export abstract class BaseBuilder {
+  // Core configuration and provider
   protected config: BaseBuilderConfigArgs;
   protected provider: Provider;
+  // Cached contracts to avoid repeated instantiation
   protected contracts: Map<string, Contract> = new Map();
+  // Paths and pre-computed values
   public contractsPath: string;
   public factoryClassHash?: string;
   public factoryAddress?: string;
   public treasuryAddress: ContractAddress;
   public udcAddress: ContractAddress;
+  // Tracks active WebSocket event subscriptions per contract address
+  private activeSubscriptions: Map<
+    string,
+    { channel: WebSocketChannel; subscription: any }
+  > = new Map();
 
+  /**
+   * Initializes the base builder with configuration.
+   * Sets up the RPC provider and optionally pre-computes the factory class hash.
+   */
   constructor(config: BaseBuilderConfigArgs) {
     this.config = config;
     this.provider = new RpcProvider({ nodeUrl: config.nodeUrl });
@@ -46,13 +59,17 @@ export abstract class BaseBuilder {
 
   /**
    * Loads a contract ABI and caches it for reuse.
+   * Returns an existing Contract instance if the address was already loaded.
    */
   getContract(address: string, abiPath: string): Contract {
     if (this.contracts.has(address)) {
       return this.contracts.get(address)!;
     }
 
-    const contractArtifact = JSON.parse(fs.readFileSync(abiPath, "utf-8"));
+    const contractArtifact = JSON.parse(
+      fs.readFileSync(`${this.contractsPath}/${abiPath}`, "utf-8")
+    );
+
     const contractAbi = contractArtifact.abi;
 
     const contract = new Contract(contractAbi, address, this.provider);
@@ -62,6 +79,7 @@ export abstract class BaseBuilder {
 
   /**
    * Sends a transaction on-chain using a signer account.
+   * Executes the call and waits for the transaction receipt.
    */
   async sendTransaction(
     account: Account,
@@ -117,274 +135,227 @@ export abstract class BaseBuilder {
   }
 
   /**
-   * Efficient real-time event monitor using getBlockWithReceipts (single RPC call per block)
-   * Minimal CPU/RAM usage, fast detection, auto-cancel support.
+   * Efficient real-time event monitor using WebSocket subscription.
+   * Subscribes to specific events on a contract and invokes the callback for each emitted event.
+   * Supports cancellation and prevents duplicate subscriptions.
    */
-  async monitorEvents<T extends EventName>(
-    contractAddress: string,
-    eventNames: T[],
-    callback: (
-      eventData: EventCallbackData<Extract<POSEvent, { type: T }>>
-    ) => Promise<void>,
-    pollInterval = 4000,
-    abiFilePath?: string,
-    cancelToken?: () => boolean
-  ): Promise<void> {
-    // Normalize address for comparison
+  async monitorEvents<T extends EventName>({
+    contractAddress,
+    eventNames,
+    callback,
+    abiFilePath,
+    pollInterval = 4000, // unused in current WebSocket implementation
+    cancelToken,
+  }: MonitorEventsOptions<T>): Promise<void> {
     const normalizedAddress = contractAddress.toLowerCase();
 
-    // Load and cache contract with ABI
+    // Prevent duplicate monitoring – throws to allow SDK users to handle it
+    if (this.activeSubscriptions.has(normalizedAddress)) {
+      throw new Error(
+        `Already monitoring events for ${this.shortenAddress(contractAddress)}.`
+      );
+    }
+
+    // -------------------- Load ABI --------------------
+    const fullPath = join(this.contractsPath, `${abiFilePath}`);
+    if (!fs.existsSync(fullPath)) {
+      throw new Error(`ABI file not found: ${fullPath}`);
+    }
+
+    const artifact = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+    const abi = artifact.abi;
+
+    // -------------------- Contract caching --------------------
     let contract: Contract;
     if (this.contracts.has(normalizedAddress)) {
       contract = this.contracts.get(normalizedAddress)!;
-    } else if (abiFilePath) {
-      const fullPath = join(this.contractsPath, abiFilePath);
-      if (!fs.existsSync(fullPath)) {
-        throw new Error(`ABI file not found: ${fullPath}`);
-      }
-      const artifact = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
-      contract = new Contract(artifact.abi, contractAddress, this.provider);
-      this.contracts.set(normalizedAddress, contract);
     } else {
-      throw new Error("ABI file path required for first-time monitoring");
+      contract = new Contract(abi, contractAddress, this.provider);
+      this.contracts.set(normalizedAddress, contract);
     }
 
-    let lastProcessedBlock = await this.getLatestBlockNumber();
+    // -------------------- Event keys for subscription --------------------
+    const keys: string[][] = eventNames.map((name) => [
+      num.toHex(hash.starknetKeccak(name)),
+    ]);
 
-    console.log(
-      `🚀 Event monitor started for ${this.shortenAddress(contractAddress)}`
-    );
-    console.log(`   Listening for: ${eventNames.join(", ")}`);
+    // -------------------- WebSocket channel --------------------
+    const channel = new WebSocketChannel({
+      nodeUrl: this.normalizeWsUrl(this.config.nodeUrl),
+      autoReconnect: true,
+      reconnectOptions: { retries: 10, delay: 2000 },
+      requestTimeout: 60000,
+      maxBufferSize: 1000,
+    });
 
-    while (!(cancelToken && cancelToken())) {
-      try {
-        const latestBlockNumber = await this.getLatestBlockNumber();
+    let subscription: any | null = null;
 
-        if (latestBlockNumber <= lastProcessedBlock) {
-          await this.sleep(pollInterval);
-          continue;
+    try {
+      // -------------------- Connect --------------------
+      await channel.waitForConnection();
+
+      // Small delay to avoid race conditions on some nodes
+      await new Promise((r) => setTimeout(r, 500));
+
+      // -------------------- Subscribe --------------------
+      subscription = await channel.subscribeEvents(contractAddress, keys);
+      this.activeSubscriptions.set(normalizedAddress, {
+        channel,
+        subscription,
+      });
+
+      // -------------------- Event handling --------------------
+      subscription.on(async (eventData: any) => {
+        if (cancelToken && cancelToken()) return;
+
+        // Skip subscription-level errors silently
+        if (eventData?.error) {
+          return;
         }
 
-        // Process only new blocks
-        for (
-          let blockNum = lastProcessedBlock + 1;
-          blockNum <= latestBlockNumber;
-          blockNum++
-        ) {
-          try {
-            // ONE efficient RPC call: gets events directly
-            const block = await this.provider.getBlockWithReceipts(blockNum);
-            console.log({ block });
+        // Raw event in format expected by parseEvents
+        const rawEvent = {
+          from_address: eventData.from_address,
+          keys: eventData.keys,
+          data: eventData.data,
+        };
 
-            //   for (const receipt of block.transaction_receipts) {
-            //   if (!("events" in receipt) || !receipt.events?.length) continue;
+        // Get ABI helpers for parsing
+        const abiEvents = events.getAbiEvents(abi);
+        const abiStructs = CallData.getAbiStruct(abi);
+        const abiEnums = CallData.getAbiEnum(abi);
 
-            //   for (let i = 0; i < receipt.events.length; i++) {
-            //     const rawEvent = receipt.events[i];
-
-            //     // Fast address filter
-            //     if (rawEvent.from_address.toLowerCase() !== normalizedAddress)
-            //       continue;
-
-            //     try {
-            //       const parsed = contract.parseEvent(rawEvent);
-
-            //       // Fast name check
-            //       if (!eventNames.includes(parsed.name as T["type"])) continue;
-
-            //       // Fire callback
-            //       await callback({
-            //         event: {
-            //           type: parsed.name as T["type"],
-            //           data: parsed.data,
-            //         },
-            //         metadata: {
-            //           transactionHash: receipt.transaction_hash,
-            //           blockNumber: blockNum,
-            //           blockTimestamp:
-            //             block.block_timestamp ??
-            //             block.timestamp ??
-            //             Date.now() / 1000,
-            //           eventIndex: i,
-            //         },
-            //       });
-            //     } catch (parseErr) {
-            //       // Silently skip malformed events — rare but possible on devnet
-            //     }
-            //   }
-            // }
-          } catch (blockErr: any) {
-            // Single block failure shouldn't stop monitoring
-            console.warn(
-              `Failed to process block ${blockNum}: ${blockErr.message}`
-            );
-          }
-        }
-
-        // Update only after successful processing
-        lastProcessedBlock = latestBlockNumber;
-      } catch (networkErr: any) {
-        console.warn(
-          `Network error during monitoring: ${networkErr.message}. Retrying...`
+        // Parse the event using starknet.js utilities
+        const parsedEvents = events.parseEvents(
+          [rawEvent as any],
+          abiEvents,
+          abiStructs,
+          abiEnums
         );
-        await this.sleep(pollInterval * 1.5); // Backoff slightly on error
-      }
-    }
 
-    console.log(
-      `🛑 Event monitor stopped for ${this.shortenAddress(contractAddress)}`
-    );
+        if (parsedEvents.length === 0) {
+          return;
+        }
+
+        const parsed = parsedEvents[0];
+        const [eventName, eventDataObj] = Object.entries(parsed)[0] as [
+          string,
+          any
+        ];
+
+        const normalizedData = Utils.normalizeEventData(eventDataObj);
+        const type = Utils.getEventType(eventName);
+
+        // Invoke user-provided callback with structured event data
+        await callback({
+          event: {
+            type,
+            data: normalizedData as any,
+          } as Extract<POSEvent, { type: T }>,
+          metadata: {
+            transactionHash: eventData.transaction_hash,
+            blockNumber: eventData.block_number ?? -1,
+            blockTimestamp:
+              eventData.block_timestamp ?? Math.floor(Date.now() / 1000),
+            eventIndex: -1,
+          },
+        });
+      });
+
+      // Keep the monitor alive indefinitely until cancelled or errored
+      await new Promise(() => {});
+    } catch (error: any) {
+      // Cleanup on failure
+      if (subscription) {
+        try {
+          await subscription.unsubscribe();
+        } catch {}
+      }
+      channel.disconnect();
+
+      this.activeSubscriptions.delete(normalizedAddress);
+      throw error;
+    }
   }
 
-  // Helper: efficient latest block fetch (cached where possible)
+  /**
+   * Unsubscribes from events for a specific contract address.
+   * Performs best-effort cleanup of subscription and WebSocket channel.
+   */
+  async unsubscribeFromEvents(contractAddress: string): Promise<void> {
+    const normalizedAddress = contractAddress.toLowerCase();
+    const sub = this.activeSubscriptions.get(normalizedAddress);
+
+    if (!sub) return;
+
+    try {
+      if (sub.subscription) {
+        await sub.subscription.unsubscribe();
+      }
+    } catch (e) {
+      // Silent – best effort
+    }
+
+    try {
+      sub.channel.disconnect();
+      await sub.channel.waitForDisconnection();
+    } catch (e) {
+      // Silent – best effort
+    }
+
+    this.activeSubscriptions.delete(normalizedAddress);
+  }
+
+  /**
+   * Unsubscribes from all active event monitors.
+   * Waits for all unsubscriptions to settle.
+   */
+  async unsubscribeFromAllEvents(): Promise<void> {
+    const promises = Array.from(this.activeSubscriptions.keys()).map((addr) =>
+      this.unsubscribeFromEvents(addr)
+    );
+
+    await Promise.allSettled(promises);
+  }
+
+  /**
+   * Retrieves the latest block number from the network.
+   */
   async getLatestBlockNumber(): Promise<number> {
     const block = await this.provider.getBlock("latest");
     return block.block_number;
   }
 
-  // Efficient sleep utility
+  /**
+   * Utility sleep function.
+   */
   sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  // Optional: address shortener for logs
+  /**
+   * Shortens a Starknet address for display purposes.
+   */
   shortenAddress(addr: string): string {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   }
 
-  // async monitorEvents<T extends FactoryEvent | StoreEvent>(
-  //   contractAddress: string,
-  //   eventNames: T["type"][],
-  //   callback: (eventData: EventCallbackData) => Promise<void>,
-  //   pollInterval = 5000,
-  //   abiFilePath?: string,
-  //   cancelToken?: () => boolean
-  // ): Promise<void> {
-  //   // Load the contract ABI
-  //   let contract: Contract;
-  //   if (this.contracts.has(contractAddress)) {
-  //     contract = this.contracts.get(contractAddress)!;
-  //   } else if (abiFilePath) {
-  //     if (!fs.existsSync(abiFilePath)) {
-  //       throw new Error(`ABI file not found at ${abiFilePath}`);
-  //     }
-  //     const contractArtifact = JSON.parse(
-  //       fs.readFileSync(abiFilePath, "utf-8")
-  //     );
-  //     const contractAbi = contractArtifact.abi;
-  //     contract = new Contract(contractAbi, contractAddress, this.provider);
-  //     this.contracts.set(contractAddress, contract);
-  //   } else {
-  //     throw new Error("ABI file path required for new contract monitoring");
-  //   }
+  /**
+   * Normalizes an HTTP/HTTPS node URL to a WebSocket URL ending with /ws.
+   */
+  normalizeWsUrl(url: string): string {
+    let wsUrl = url;
 
-  //   let lastBlockNumber: number | null = null;
+    if (!wsUrl.startsWith("ws")) {
+      wsUrl = wsUrl
+        .replace(/^http:\/\//, "ws://")
+        .replace(/^https:\/\//, "wss://");
+    }
 
-  //   while (true) {
-  //     if (cancelToken && cancelToken()) {
-  //       console.log("Event monitoring cancelled");
-  //       break;
-  //     }
+    if (!wsUrl.endsWith("/ws")) {
+      wsUrl = `${wsUrl.replace(/\/$/, "")}/ws`;
+    }
 
-  //     try {
-  //       const latestBlock = await this.provider.getBlock("latest");
-  //       const currentBlockNumber = latestBlock.block_number;
-  //       const blockTimestamp = latestBlock.timestamp;
-
-  //       if (lastBlockNumber === null) lastBlockNumber = currentBlockNumber - 1;
-
-  //       if (currentBlockNumber > lastBlockNumber) {
-  //         for (
-  //           let blockNum = lastBlockNumber + 1;
-  //           blockNum <= currentBlockNumber;
-  //           blockNum++
-  //         ) {
-  //           const block = await this.provider.getBlock(blockNum);
-  //           const txReceipts: any[] = await Promise.all(
-  //             block.transactions.map((txHash: string) =>
-  //               this.provider.getTransactionReceipt(txHash)
-  //             )
-  //           );
-
-  //           for (const receipt of txReceipts) {
-  //             if (!receipt.events || receipt.events.length === 0) continue;
-
-  //             for (
-  //               let eventIndex = 0;
-  //               eventIndex < receipt.events.length;
-  //               eventIndex++
-  //             ) {
-  //               const rawEvent = receipt.events[eventIndex];
-
-  //               if (
-  //                 rawEvent.from_address.toLowerCase() !==
-  //                 contractAddress.toLowerCase()
-  //               )
-  //                 continue;
-
-  //               // Filter only requested events
-  //               const eventAbi = (contract.abi as any)
-  //                 .filter((entry: any) => entry.type === "event")
-  //                 .find((e: any) =>
-  //                   eventNames.some((name) => e.name.endsWith(name))
-  //                 );
-  //               if (!eventAbi) continue;
-
-  //               const decoded: Record<string, any> = {};
-
-  //               // Decode key fields
-  //               if (rawEvent.keys && rawEvent.keys.length > 0) {
-  //                 eventAbi.members?.forEach((field: any, idx: number) => {
-  //                   if (field.key) {
-  //                     decoded[field.name] = rawEvent.keys[idx];
-  //                   }
-  //                 });
-  //               }
-
-  //               // Decode data fields (non-key)
-  //               rawEvent.data.forEach((val: string, idx: number) => {
-  //                 const field =
-  //                   eventAbi.members?.[idx] || eventAbi.inputs?.[idx];
-  //                 if (!field || field.key) return; // skip key fields here
-  //                 const name = field.name;
-
-  //                 if (
-  //                   field.type === "core::integer::u256" ||
-  //                   field.type?.startsWith("Uint256")
-  //                 ) {
-  //                   decoded[name] = uint256.uint256ToBN({
-  //                     low: BigInt(val),
-  //                     high: BigInt(0),
-  //                   });
-  //                 } else {
-  //                   decoded[name] = val;
-  //                 }
-  //               });
-
-  //               await callback({
-  //                 event: {
-  //                   type: eventAbi.name.split("::").pop()!,
-  //                   data: decoded as any,
-  //                 },
-  //                 metadata: {
-  //                   transactionHash: receipt.transaction_hash,
-  //                   blockNumber: receipt.block_number,
-  //                   blockTimestamp,
-  //                   eventIndex,
-  //                 },
-  //               });
-  //             }
-  //           }
-  //         }
-  //         lastBlockNumber = currentBlockNumber;
-  //       }
-  //     } catch (err: any) {
-  //       console.error(
-  //         `Error monitoring events for ${contractAddress}: ${err.message}`
-  //       );
-  //     }
-
-  //     await new Promise((resolve) => setTimeout(resolve, pollInterval));
-  //   }
-  // }
+    return wsUrl;
+  }
 }

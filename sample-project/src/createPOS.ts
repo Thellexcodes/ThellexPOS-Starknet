@@ -5,8 +5,8 @@ import {
   POSConstructorArgs,
   POSType,
 } from "@thellex/pos-sdk";
-import { Account } from "starknet";
-import { FACTORY_ACCOUNT_ADDRESS } from "./config";
+import { Account, Call } from "starknet";
+import { FACTORY_ACCOUNT_ADDRESS, merchantAccount } from "./config";
 import { join } from "path";
 import { CONTRACTS_DIR, FACTORY_FILENAME } from "./config";
 import { dump } from "./utils/dump";
@@ -15,14 +15,14 @@ export async function createPOSInstance(
   factoryAddress: ContractAddress,
   factoryBuilder: FactoryBuilder,
   factoryAccount: Account,
-  account: Account,
+  merchantAccount: Account,
   storeClassHash: string,
-  type: POSType
-): Promise<ContractAddress | any> {
+  type: POSType = "store"
+): Promise<ContractAddress> {
   console.log("\n🏗️ Creating new POS instance...");
 
   const posArgs: POSConstructorArgs = {
-    owner: FACTORY_ACCOUNT_ADDRESS,
+    owner: merchantAccount.address as ContractAddress,
     treasury: FACTORY_ACCOUNT_ADDRESS,
     fee_percent: 500,
     tax_percent: 200,
@@ -30,45 +30,54 @@ export async function createPOSInstance(
     factory_address: factoryAddress,
   };
 
-  const createPosTx = await factoryBuilder.buildCreatePOS(
-    `${CONTRACTS_DIR}${FACTORY_FILENAME}`,
-    posArgs.factory_address,
-    {
-      type,
-      merchant: account.address as ContractAddress,
-      storeName: "Thellex",
-    }
-  );
+  // -------------------- Build tx --------------------
+  const createPosTx = factoryBuilder.buildCreatePOS({
+    factoryAddress: posArgs.factory_address,
+    type,
+    merchant: merchantAccount.address as ContractAddress,
+    storeName: "Thellex Store",
+  });
 
-  const storePosReceipt = await factoryAccount.execute(createPosTx);
-  await factoryAccount.waitForTransaction(storePosReceipt.transaction_hash);
+  // -------------------- Execute tx --------------------
+  const receipt = await merchantAccount.execute(createPosTx);
+  console.log(`POS creation tx sent: ${receipt.transaction_hash}`);
 
-  dump({ storePosReceipt });
+  await merchantAccount.waitForTransaction(receipt.transaction_hash);
+  console.log("POS creation transaction ACCEPTED_ON_L2");
 
-  const posAddress = await new Promise<ContractAddress>((resolve, reject) => {
+  // -------------------- Wait for event --------------------
+  console.log("Waiting for StorePOSCreated / PersonalPOSCreated event...");
+
+  return new Promise<ContractAddress>(async (resolve, reject) => {
     let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) reject(new Error("Timeout: No POS created in 60s"));
-    }, 60000);
 
-    factoryBuilder.monitorEvents(
-      factoryAddress,
-      ["StorePOSCreated"],
-      async (eventData) => {
-        if (resolved) return;
-        dump({ eventData });
+    try {
+      await factoryBuilder.monitorEvents({
+        contractAddress: factoryAddress,
+        eventNames: ["StorePOSCreated", "PersonalPOSCreated"],
+        abiFilePath: "pos_Factory.contract_class.json",
+        cancelToken: () => resolved,
+        callback: async (eventData) => {
+          const event = eventData.event;
 
-        // const posAddr = eventData.event.data.pos_address as string;
-        // console.log(`POS Created: ${shortenAddress(posAddr)}`);
+          if (
+            event.type === "StorePOSCreated" ||
+            event.type === "PersonalPOSCreated"
+          ) {
+            const posAddress = event.data.pos_address as ContractAddress;
 
-        resolved = true;
-        clearTimeout(timeout);
-        // resolve(posAddr as ContractAddress);
-        resolve("" as any);
-      },
-      3000, // Check every 3s — perfect balance
-      "pos_Factory.contract_class.json",
-      () => resolved
-    );
+            console.log("✅ POS successfully created!");
+            console.log(`   Type: ${event.type}`);
+            console.log(`   Address: ${posAddress}`);
+            console.log(`   Tx Hash: ${eventData.metadata.transactionHash}`);
+
+            resolved = true;
+            resolve(posAddress);
+          }
+        },
+      });
+    } catch (err) {
+      reject(err);
+    }
   });
 }

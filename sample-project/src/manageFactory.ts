@@ -10,8 +10,6 @@ export async function manageFactorySettings(
 ) {
   console.log("\n⚙️ Managing Factory Settings");
 
-  const factoryFilename = "pos_Factory.contract_class.json";
-
   // === 1. Add Supported Tokens ===
   if (tokenAddresses.length > 0) {
     console.log(
@@ -21,8 +19,7 @@ export async function manageFactorySettings(
     for (const tokenAddress of tokenAddresses) {
       const isAlreadySupported = await factoryBuilder.isSupportedToken(
         factoryAddress,
-        tokenAddress,
-        factoryFilename
+        tokenAddress
       );
 
       if (isAlreadySupported) {
@@ -36,8 +33,7 @@ export async function manageFactorySettings(
 
       const addTx = factoryBuilder.buildAddSupportedToken(
         factoryAddress,
-        tokenAddress,
-        factoryFilename
+        tokenAddress
       );
 
       await factoryBuilder.sendTransaction(factoryAccount, addTx);
@@ -55,37 +51,24 @@ export async function manageFactorySettings(
       name: "Treasury",
       tx: factoryBuilder.buildUpdateTreasury(
         factoryAddress,
-        "0x2222222222222222222222222222222222222222", // New treasury
-        factoryFilename
+        "0x2222222222222222222222222222222222222222"
       ),
     },
     {
       name: "Fee Percent (7%)",
-      tx: factoryBuilder.buildUpdateFeePercent(
-        factoryAddress,
-        700,
-        factoryFilename
-      ),
+      tx: factoryBuilder.buildUpdateFeePercent(factoryAddress, 700),
     },
     {
       name: "Tax Percent (3%)",
-      tx: factoryBuilder.buildUpdateTaxPercent(
-        factoryAddress,
-        300,
-        factoryFilename
-      ),
+      tx: factoryBuilder.buildUpdateTaxPercent(factoryAddress, 300),
     },
     {
       name: "Timeout (2 hours)",
-      tx: factoryBuilder.buildUpdateTimeout(
-        factoryAddress,
-        7200,
-        factoryFilename
-      ),
+      tx: factoryBuilder.buildUpdateTimeout(factoryAddress, 7200),
     },
     {
       name: "Pause Factory",
-      tx: factoryBuilder.buildSetPaused(factoryAddress, false, factoryFilename),
+      tx: factoryBuilder.buildSetPaused(factoryAddress, false),
     },
   ];
 
@@ -97,40 +80,36 @@ export async function manageFactorySettings(
   // === 3. Query & Display Final State ===
   console.log("\nFetching current factory state...");
 
-  const [treasury, feePercent, taxPercent, timeout] = await Promise.all([
-    factoryBuilder.getTreasury(factoryAddress, factoryFilename),
-    factoryBuilder.getFeePercent(factoryAddress, factoryFilename),
-    factoryBuilder.getTaxPercent(factoryAddress, factoryFilename),
-    factoryBuilder.getTimeout(factoryAddress, factoryFilename),
-    factoryBuilder.getPaused(factoryAddress, factoryFilename), // assuming you have this getter
-  ]);
+  // const [treasury, feePercent, taxPercent, timeout] = await Promise.all([
+  //   factoryBuilder.getTreasury(factoryAddress),
+  //   factoryBuilder.getFeePercent(factoryAddress),
+  //   factoryBuilder.getTaxPercent(factoryAddress),
+  //   factoryBuilder.getTimeout(factoryAddress),
+  //   // factoryBuilder.getPaused(factoryAddress), // assuming you have this getter
+  // ]);
 
-  // Check support for first token if any
-  const sampleToken = tokenAddresses[0];
-  const sampleSupported = sampleToken
-    ? await factoryBuilder.isSupportedToken(
-        factoryAddress,
-        sampleToken,
-        factoryFilename
-      )
-    : false;
+  // // Check support for first token if any
+  // const sampleToken = tokenAddresses[0];
+  // const sampleSupported = sampleToken
+  //   ? await factoryBuilder.isSupportedToken(factoryAddress, sampleToken)
+  //   : false;
 
-  console.log("\n✅ Final Factory State:");
-  const timeoutSeconds =
-    typeof timeout === "number" ? timeout : parseInt(`${timeout}`, 10);
+  // console.log("\n✅ Final Factory State:");
+  // const timeoutSeconds =
+  //   typeof timeout === "number" ? timeout : parseInt(`${timeout}`, 10);
 
-  console.table({
-    Treasury: shortenAddress(treasury),
-    "Fee Percent": `${feePercent / 100}%`,
-    "Tax Percent": `${taxPercent / 100}%`,
-    Timeout: `${timeoutSeconds} seconds (~${Math.round(
-      timeoutSeconds / 3600
-    )} hours)`,
-    // Paused: isPaused ? "Yes" : "No",
-    "Sample Token Supported": sampleToken
-      ? `${shortenAddress(sampleToken)} → ${sampleSupported ? "Yes" : "No"}`
-      : "N/A",
-  });
+  // console.table({
+  //   Treasury: shortenAddress(treasury),
+  //   "Fee Percent": `${feePercent / 100}%`,
+  //   "Tax Percent": `${taxPercent / 100}%`,
+  //   Timeout: `${timeoutSeconds} seconds (~${Math.round(
+  //     timeoutSeconds / 3600
+  //   )} hours)`,
+  //   // Paused: isPaused ? "Yes" : "No",
+  //   "Sample Token Supported": sampleToken
+  //     ? `${shortenAddress(sampleToken)} → ${sampleSupported ? "Yes" : "No"}`
+  //     : "N/A",
+  // });
 }
 
 // Helper: shorten address for clean logs

@@ -25,6 +25,12 @@ export const MERCHANT_PRIVATE_KEY =
 
 const provider = new RpcProvider({ nodeUrl: NODE_URL });
 
+export const factoryAccount = new Account(
+  provider,
+  FACTORY_ACCOUNT_ADDRESS,
+  FACTORY_PRIVATE_KEY
+);
+
 export const merchantAccount = new Account(
   provider,
   MERCHANT_ADDRESS,

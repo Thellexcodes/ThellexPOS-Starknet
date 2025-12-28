@@ -1,18 +1,28 @@
-// src/token/manageERC20.ts
-import { Account, RpcProvider, Contract } from "starknet";
-import {
-  NODE_URL,
-  FACTORY_ACCOUNT_ADDRESS,
-  FACTORY_PRIVATE_KEY,
-} from "../config";
+import { ContractAddress } from "@thellex/pos-sdk";
+import { Call, uint256, Contract, Account, RpcProvider } from "starknet";
+import { NODE_URL } from "../config";
 
+/**
+ * ERC20Manager
+ *
+ * Utility class to interact with standard ERC20 tokens on Starknet.
+ * Provides safe transfer, approve, and balance/allowance queries.
+ *
+ * Used in Thellex POS flows for:
+ * - Funding a Store POS with tokens (external deposit)
+ * - Approving the POS to spend tokens (if needed in future)
+ */
 export class ERC20Manager {
   private contract: Contract;
+  private readonly tokenAddress: ContractAddress;
 
-  constructor(tokenAddress: string) {
-    const provider = new RpcProvider({ nodeUrl: NODE_URL });
-    const abi = [
-      // Minimal ABI needed
+  /**
+   * @param tokenAddress - Address of the ERC20 token contract
+   * @param nodeUrl - Optional RPC node URL (defaults to global config if available)
+   */
+  constructor(tokenAddress: ContractAddress, nodeUrl?: string) {
+    const provider = new RpcProvider({ nodeUrl: nodeUrl || NODE_URL });
+    const minimalAbi = [
       {
         name: "transfer",
         type: "function",
@@ -21,6 +31,7 @@ export class ERC20Manager {
           { name: "amount", type: "u256" },
         ],
         outputs: [{ type: "bool" }],
+        stateMutability: "external",
       },
       {
         name: "approve",
@@ -30,12 +41,14 @@ export class ERC20Manager {
           { name: "amount", type: "u256" },
         ],
         outputs: [{ type: "bool" }],
+        stateMutability: "external",
       },
       {
-        name: "balance_of",
+        name: "balanceOf",
         type: "function",
         inputs: [{ name: "account", type: "ContractAddress" }],
         outputs: [{ type: "u256" }],
+        stateMutability: "view",
       },
       {
         name: "allowance",
@@ -45,39 +58,91 @@ export class ERC20Manager {
           { name: "spender", type: "ContractAddress" },
         ],
         outputs: [{ type: "u256" }],
+        stateMutability: "view",
       },
     ];
 
-    this.contract = new Contract(abi, tokenAddress, provider);
+    this.tokenAddress = tokenAddress;
+    this.contract = new Contract(minimalAbi, tokenAddress, provider);
   }
 
-  async transfer(recipient: string, amount: string, account: Account) {
+  /**
+   * Transfers tokens from the signer's account to a recipient (e.g., Store POS).
+   *
+   * @param recipient - Destination address (e.g., Store POS contract)
+   * @param amount - Amount as decimal string (e.g., "100.0")
+   * @param account - Signer account (must hold the tokens)
+   * @returns Transaction hash
+   */
+  async transfer(
+    recipient: ContractAddress,
+    amount: string,
+    account: Account
+  ): Promise<string> {
+    const amountU256 = uint256.bnToUint256(amount);
+
     const { transaction_hash } = await account.execute({
-      contractAddress: this.contract.address,
+      contractAddress: this.tokenAddress,
       entrypoint: "transfer",
-      calldata: [recipient, amount, "0"],
+      calldata: [recipient, amountU256.low, amountU256.high],
     });
+
     await account.waitForTransaction(transaction_hash);
-    console.log(`Transferred ${amount} tokens to ${recipient}`);
+    console.log(
+      `Transferred ${amount} tokens to ${recipient}. Tx: ${transaction_hash}`
+    );
+    return transaction_hash;
   }
 
-  async approve(spender: string, amount: string, account: Account) {
+  /**
+   * Approves a spender (e.g., Store POS) to spend tokens on behalf of the signer.
+   *
+   * @param spender - Address to approve (e.g., Store POS)
+   * @param amount - Amount to approve as decimal string
+   * @param account - Signer account
+   * @returns Transaction hash
+   */
+  async approve(
+    spender: ContractAddress,
+    amount: string,
+    account: Account
+  ): Promise<string> {
+    const amountU256 = uint256.bnToUint256(amount);
+
     const { transaction_hash } = await account.execute({
-      contractAddress: this.contract.address,
+      contractAddress: this.tokenAddress,
       entrypoint: "approve",
-      calldata: [spender, amount, "0"],
+      calldata: [spender, amountU256.low, amountU256.high],
     });
+
     await account.waitForTransaction(transaction_hash);
-    console.log(`Approved ${amount} for spender ${spender}`);
+    console.log(`Approved ${amount} tokens for spender ${spender}`);
+    return transaction_hash;
   }
 
-  async getBalance(account: string): Promise<string> {
-    const balance = await this.contract.call("balance_of", [account]);
-    return balance.toString();
+  /**
+   * Gets the token balance of an account.
+   *
+   * @param account - Address to query
+   * @returns Balance as decimal string
+   */
+  async getBalance(account: ContractAddress): Promise<string> {
+    const result = await this.contract.balanceOf(account);
+    return uint256.uint256ToBN(result).toString();
   }
 
-  async getAllowance(owner: string, spender: string): Promise<string> {
-    const allowance = await this.contract.call("allowance", [owner, spender]);
-    return allowance.toString();
+  /**
+   * Gets the remaining allowance from owner to spender.
+   *
+   * @param owner - Token owner
+   * @param spender - Approved spender
+   * @returns Allowance as decimal string
+   */
+  async getAllowance(
+    owner: ContractAddress,
+    spender: ContractAddress
+  ): Promise<string> {
+    const result = await this.contract.allowance(owner, spender);
+    return uint256.uint256ToBN(result).toString();
   }
 }

@@ -1,175 +1,353 @@
 import { Call, uint256 } from "starknet";
 import { ContractAddress } from "../types";
-import { AbstractPOS } from "./abstracts/Store";
 import { FactoryBuilder } from "./FactoryBuilder";
+import { AbstractStoreBuilder } from "./abstracts/AbstractStoreBuilder";
+import { BaseBuilder } from "../core/BaseBuilder";
 
-export class StoreBuilder extends AbstractPOS {
-  private factoryBuilder: FactoryBuilder;
-
-  constructor(factoryBuilder: FactoryBuilder) {
-    super();
-    this.factoryBuilder = factoryBuilder;
-  }
+/**
+ * StoreBuilder
+ *
+ * Concrete implementation of AbstractStoreBuilder for interacting with
+ * deployed Thellex Store POS contracts (point-of-sale payment terminals).
+ *
+ * This class leverages BaseBuilder for provider access, contract caching,
+ * ABI loading, and utility methods. All Store POS instances share the same ABI.
+ *
+ * Credits:
+ *   © Thellex – Protocol design, architecture, and ecosystem
+ *   Samuel Anthony – Primary author of the Store POS and Factory contracts
+ */
+export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
+  /** Relative path to the compiled Store POS ABI JSON file */
+  private readonly STORE_ABI_PATH = "store_pos.json";
 
   /**
-   * Build a deposit transaction
+   * Constructs a new StoreBuilder instance.
+   * Inherits configuration (nodeUrl, contractsPath, etc.) from BaseBuilder.
+   *
+   * @param config - BaseBuilder configuration object
+   */
+  constructor(config: any) {
+    super(config);
+  }
+
+  // ===========================================================================
+  // Transaction Building – On-chain & Signed Actions
+  // ===========================================================================
+
+  /**
+   * Builds an on-chain deposit call.
+   * User transfers tokens to the Store POS and registers a unique tx_id.
+   *
+   * @param storeAddress - Deployed Store POS contract address
+   * @param amount - Deposit amount as decimal string (e.g., "250.0")
+   * @param txId - Unique transaction identifier (felt252 as string)
+   * @param token - ERC20 token contract address
+   * @returns Populated Call object
    */
   buildDeposit(
-    posAddress: ContractAddress,
+    storeAddress: ContractAddress,
     amount: string,
     txId: string,
     token: ContractAddress
   ): Call {
-    return {
-      contractAddress: posAddress,
-      entrypoint: "deposit",
-      calldata: [...Object.values(uint256.bnToUint256(amount)), txId, token],
-    };
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+
+    return contract.populate("deposit", {
+      amount: uint256.bnToUint256(amount),
+      tx_id: txId,
+      token,
+    });
   }
 
   /**
-   * Build a transaction approval call
+   * Placeholder for building an approve_transaction call.
+   * This function requires an off-chain EIP-712 signature from Owner/Manager.
+   * Full implementation needs nonce, deadline, and signature parameters.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param txId - Deposit transaction ID to approve
    */
-  buildApproveTransaction(posAddress: ContractAddress, txId: string): Call {
-    return {
-      contractAddress: posAddress,
-      entrypoint: "approve_transaction",
-      calldata: [txId],
-    };
+  buildApproveTransaction(storeAddress: ContractAddress, txId: string): Call {
+    throw new Error(
+      "approve_transaction requires off-chain signature (signer, nonce, deadline, pubkey, sig_r, sig_s)."
+    );
   }
 
   /**
-   * Build a transaction rejection call
+   * Placeholder for building a reject_transaction call.
+   * Requires off-chain signature from Owner/Manager.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param txId - Deposit transaction ID to reject
    */
-  buildRejectTransaction(posAddress: ContractAddress, txId: string): Call {
-    return {
-      contractAddress: posAddress,
-      entrypoint: "reject_transaction",
-      calldata: [txId],
-    };
+  buildRejectTransaction(storeAddress: ContractAddress, txId: string): Call {
+    throw new Error(
+      "reject_transaction requires off-chain signature (signer, nonce, deadline, pubkey, sig_r, sig_s)."
+    );
   }
 
   /**
-   * Build an automatic refund call
+   * Placeholder for building an auto_refund_signed call.
+   * Allows Owner/Manager to refund a timed-out deposit (minus tax) to a custom receiver.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param txId - Timed-out deposit transaction ID
+   * @param refundReceiver - Address receiving the refund
    */
   buildAutoRefund(
-    posAddress: ContractAddress,
+    storeAddress: ContractAddress,
     txId: string,
     refundReceiver: ContractAddress
   ): Call {
-    return {
-      contractAddress: posAddress,
-      entrypoint: "auto_refunded_amount",
-      calldata: [txId, refundReceiver],
-    };
+    throw new Error(
+      "auto_refund_signed requires off-chain signature (signer, nonce, deadline, pubkey, sig_r, sig_s)."
+    );
   }
 
   /**
-   * Build a withdrawal transaction call
+   * Builds a withdraw_to_owner call (off-chain signed by Owner/Manager).
+   * Withdraws accumulated balance for a specific token.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param amount - Amount to withdraw as decimal string
+   * @param token - Token contract address
+   * @returns Populated Call object
    */
   buildWithdraw(
-    posAddress: ContractAddress,
-    recipient: ContractAddress,
+    storeAddress: ContractAddress,
     amount: string,
     token: ContractAddress
   ): Call {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+
+    return contract.populate("withdraw_to_owner", {
+      token,
+      amount: uint256.bnToUint256(amount),
+    });
+  }
+
+  /**
+   * Builds a batch_withdraw call to withdraw multiple tokens in one transaction.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param tokens - Array of token contract addresses
+   * @param amounts - Parallel array of amounts as decimal strings
+   * @param recipient - Destination address (typically owner or treasury)
+   * @returns Populated Call object
+   */
+  buildBatchWithdraw(
+    storeAddress: ContractAddress,
+    tokens: ContractAddress[],
+    amounts: string[],
+    recipient: ContractAddress
+  ): Call {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+
+    const amountsUint256 = amounts.map((a) => uint256.bnToUint256(a));
+
+    return contract.populate("batch_withdraw", {
+      tokens,
+      amounts: amountsUint256,
+      recipient,
+    });
+  }
+
+  /**
+   * Builds a create_payment_request call (Cashier+ role).
+   * Creates a payable request that customers can fulfill directly.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param amount - Requested amount as decimal string
+   * @param token - Token contract address
+   * @param requestId - Unique request identifier (felt252 string)
+   * @returns Populated Call object
+   */
+  buildCreatePaymentRequest(
+    storeAddress: ContractAddress,
+    amount: string,
+    token: ContractAddress,
+    requestId: string
+  ): Call {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+
+    return contract.populate("create_payment_request", {
+      amount: uint256.bnToUint256(amount),
+      token,
+      request_id: requestId,
+    });
+  }
+
+  /**
+   * Builds a fulfill_payment_request call.
+   * Customer pays directly on-chain to settle an active payment request.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param requestId - Payment request ID
+   * @param amount - Exact amount matching the request (decimal string)
+   * @param token - Exact token matching the request
+   * @returns Populated Call object
+   */
+  buildFulfillPaymentRequest(
+    storeAddress: ContractAddress,
+    requestId: string,
+    amount: string,
+    token: ContractAddress
+  ): Call {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+
+    return contract.populate("fulfill_payment_request", {
+      request_id: requestId,
+      amount: uint256.bnToUint256(amount),
+      token,
+    });
+  }
+
+  /**
+   * Placeholder for register_external_deposit (off-chain signed by Owner/Manager).
+   * Credits balance without requiring on-chain token transfer.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param amount - Deposit amount as decimal string
+   * @param token - Token contract address
+   * @param sender - Original depositor address
+   */
+  buildRegisterExternalDeposit(
+    storeAddress: ContractAddress,
+    amount: string,
+    token: ContractAddress,
+    sender: ContractAddress
+  ): Call {
+    throw new Error(
+      "register_external_deposit requires off-chain signature (signer, nonce, deadline, pubkey, sig_r, sig_s)."
+    );
+  }
+
+  // ===========================================================================
+  // State Query Methods
+  // ===========================================================================
+
+  /**
+   * Retrieves detailed information about a specific deposit.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param txId - Transaction/deposit ID
+   * @returns Parsed deposit info object
+   */
+  async getDeposit(storeAddress: ContractAddress, txId: string): Promise<any> {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+    const result = await contract.get_deposit(txId);
+
     return {
-      contractAddress: posAddress,
-      entrypoint: "withdraw_funds",
-      calldata: [
-        recipient,
-        ...Object.values(uint256.bnToUint256(amount)),
-        token,
-      ],
+      amount: uint256.uint256ToBN(result.amount).toString(),
+      token: result.token as ContractAddress,
+      sender: result.sender as ContractAddress,
+      timestamp: Number(result.timestamp),
+      approved: Boolean(result.approved),
     };
   }
 
   /**
-   * Retrieve deposit details from a POS contract
+   * Gets the current credited balance of a token inside the Store POS.
+   *
+   * @param storeAddress - Store POS contract address
+   * @param token - Token contract address
+   * @returns Balance as decimal string
    */
-  async getDeposit(posAddress: ContractAddress, txId: string): Promise<any> {
-    const contract = await this.factoryBuilder.getContract(
-      posAddress,
-      "ThellexPOSV1"
-    );
-    const result = await contract.call("get_deposit", [txId]);
-
-    // return {
-    //   sender: num.toHex(result.sender),
-    //   amount: uint256.uint256ToBN(result.amount).toString(),
-    //   token: num.toHex(result.token),
-    //   txId: num.toHex(result.tx_id),
-    //   timestamp: BigInt(result.timestamp).toString(),
-    //   approved: Boolean(result.approved),
-    //   refunded: Boolean(result.refunded),
-    // };
-  }
-
-  /**
-   * Get balance of a given token for the POS contract
-   */
-  async getPOSBalance(
-    posAddress: ContractAddress,
+  async getStoreBalance(
+    storeAddress: ContractAddress,
     token: ContractAddress
-  ): Promise<string | any> {
-    const contract = await this.factoryBuilder.getContract(
-      posAddress,
-      "ThellexPOSV1"
-    );
-    const result = await contract.call("get_balance", [token]);
-    // return uint256.uint256ToBN(result.balance).toString();
+  ): Promise<string> {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+    const result = await contract.balance_of(token);
+    return uint256.uint256ToBN(result).toString();
   }
 
   /**
-   * Get all pending transactions on the POS
+   * Retrieves pending (unapproved) deposit transaction IDs.
+   * Not directly available on-chain – requires event monitoring or off-chain indexing.
+   *
+   * @param storeAddress - Store POS contract address
    */
-  async getPendingTransactions(posAddress: ContractAddress): Promise<any> {
-    const contract = await this.factoryBuilder.getContract(
-      posAddress,
-      "ThellexPOSV1"
+  async getPendingTransactions(
+    storeAddress: ContractAddress
+  ): Promise<string[]> {
+    throw new Error(
+      "Pending transactions cannot be queried directly on-chain. Use event monitoring via monitorEvents()."
     );
-    const result = await contract.call("get_pending_transactions", []);
-    // return result.tx_ids.map((id: string) => num.toHex(id));
   }
 
   /**
-   * Get owner of the POS contract
+   * Gets the owner address of the Store POS contract.
+   *
+   * @param storeAddress - Store POS contract address
+   * @returns Owner address
    */
-  async getOwner(posAddress: ContractAddress): Promise<ContractAddress | any> {
-    const contract = await this.factoryBuilder.getContract(
-      posAddress,
-      "ThellexPOSV1"
-    );
-    const result = await contract.call("get_owner", []);
-    // return result.owner;
+  async getOwner(storeAddress: ContractAddress): Promise<ContractAddress> {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+    const result = await contract.owner();
+    return result as ContractAddress;
   }
 
   /**
-   * Get current treasury address used by the POS contract
+   * Gets the treasury address configured in the Store POS.
+   *
+   * @param storeAddress - Store POS contract address
+   * @returns Treasury address
    */
-  async getTreasury(
-    posAddress: ContractAddress
-  ): Promise<ContractAddress | any> {
-    const contract = await this.factoryBuilder.getContract(
-      posAddress,
-      "ThellexPOSV1"
-    );
-    const result = await contract.call("get_treasury", []);
-    // return result.treasury;
+  async getTreasury(storeAddress: ContractAddress): Promise<ContractAddress> {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+    const result = await contract.treasury();
+    return result as ContractAddress;
   }
 
   /**
-   * Check if a token is supported by the POS contract
+   * Checks if a token is supported (whitelisted by the factory).
+   *
+   * @param storeAddress - Store POS contract address
+   * @param token - Token address to check
+   * @returns true if supported
    */
   async isSupportedToken(
-    posAddress: ContractAddress,
+    storeAddress: ContractAddress,
     token: ContractAddress
-  ): Promise<boolean | any> {
-    const contract = await this.factoryBuilder.getContract(
-      posAddress,
-      "ThellexPOSV1"
-    );
-    const result = await contract.call("is_supported_token", [token]);
-    // return Boolean(result.supported);
+  ): Promise<boolean> {
+    // Token support is managed at factory level
+    // We need factory address – attempt to read from contract if exposed
+    try {
+      const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+      const factoryAddr = await contract.factory(); // assuming factory() view exists
+      const factoryContract = this.getContract(factoryAddr, "factory.json");
+      const supported = await factoryContract.is_supported_token(token);
+      return Boolean(supported);
+    } catch {
+      throw new Error(
+        "Unable to determine token support – factory address not accessible."
+      );
+    }
+  }
+
+  /**
+   * Checks if the Store POS contract is currently paused.
+   *
+   * @param storeAddress - Store POS contract address
+   * @returns true if paused
+   */
+  async isPaused(storeAddress: ContractAddress): Promise<boolean> {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+    const result = await contract.is_paused();
+    return Boolean(result);
+  }
+
+  /**
+   * Checks if the Store POS contract has been successfully initialized.
+   *
+   * @param storeAddress - Store POS contract address
+   * @returns true if initialized
+   */
+  async isInitialized(storeAddress: ContractAddress): Promise<boolean> {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+    const result = await contract.is_initialized();
+    return Boolean(result);
   }
 }

@@ -1,4 +1,5 @@
 import { BigNumberish } from "starknet";
+import { EventCallbackData, EventName, POSEvent } from "./events";
 
 export type ContractAddress = `0x${string}`;
 
@@ -36,3 +37,23 @@ export interface POSConstructorArgs {
 }
 
 export type POSType = "personal" | "store";
+
+export interface MonitorEventsOptions<T extends EventName> {
+  contractAddress: string;
+  eventNames: T[];
+  callback: (
+    eventData: EventCallbackData<Extract<POSEvent, { type: T }>>
+  ) => Promise<void>;
+
+  abiFilePath?: string;
+  pollInterval?: number;
+  cancelToken?: () => boolean;
+}
+
+export interface BuildCreatePOSArgs {
+  factoryAddress: ContractAddress;
+  type: "personal" | "store";
+  owner?: ContractAddress;
+  merchant?: ContractAddress;
+  storeName?: string;
+}

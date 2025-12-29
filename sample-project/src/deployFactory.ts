@@ -2,7 +2,11 @@
 import { RpcProvider, Account } from "starknet";
 import fs from "fs";
 import { join } from "path";
-import { FactoryBuilder, ContractAddress } from "@thellex/pos-sdk";
+import {
+  FactoryBuilder,
+  ContractAddress,
+  StoreBuilder,
+} from "@thellex/pos-sdk";
 import {
   NODE_URL,
   FACTORY_PRIVATE_KEY,
@@ -39,10 +43,10 @@ export async function deployAndInitializeFactory() {
     udcAddress: UDC_ADDRESS,
   });
 
+  const storeBuilder = new StoreBuilder(factoryBuilder);
+
   const factoryClassHash = factoryBuilder.computeClassHash(factoryContractPath);
   const storeClassHash = factoryBuilder.computeClassHash(storeContractPath);
-
-  dump({ factoryClassHash, storeClassHash });
 
   // Declare if needed
   await factoryAccount.declareIfNot({
@@ -84,6 +88,7 @@ export async function deployAndInitializeFactory() {
   return {
     // factoryAddress: deployResponse.contract_address as ContractAddress,
     factoryBuilder,
+    storeBuilder,
     factoryAccount,
     storeClassHash,
   };

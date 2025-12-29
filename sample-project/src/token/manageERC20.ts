@@ -1,5 +1,14 @@
 import { ContractAddress } from "@thellex/pos-sdk";
-import { Call, uint256, Contract, Account, RpcProvider } from "starknet";
+import {
+  Call,
+  uint256,
+  Contract,
+  Account,
+  RpcProvider,
+  num,
+  Result,
+  CallData,
+} from "starknet";
 import { NODE_URL } from "../config";
 
 /**
@@ -44,7 +53,7 @@ export class ERC20Manager {
         stateMutability: "external",
       },
       {
-        name: "balanceOf",
+        name: "balance_of",
         type: "function",
         inputs: [{ name: "account", type: "ContractAddress" }],
         outputs: [{ type: "u256" }],
@@ -127,7 +136,8 @@ export class ERC20Manager {
    * @returns Balance as decimal string
    */
   async getBalance(account: ContractAddress): Promise<string> {
-    const result = await this.contract.balanceOf(account);
+    const cleanAccount = num.toHex(account);
+    const result = await this.contract.balance_of(cleanAccount);
     return uint256.uint256ToBN(result).toString();
   }
 

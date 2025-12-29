@@ -88,7 +88,8 @@ async function main() {
   // =====================
   console.log("Deploying and initializing POS Factory...\n");
 
-  const { factoryBuilder, factoryAccount } = await deployAndInitializeFactory();
+  const { factoryBuilder, factoryAccount, storeBuilder } =
+    await deployAndInitializeFactory();
 
   const factoryAddress: ContractAddress =
     "0x7c183c3336b62234ff8ceb5d985f0247eace1ef0651853941ed77794c087621";
@@ -150,8 +151,6 @@ async function main() {
   const posAddress = await createPOSInstance(
     factoryAddress,
     factoryBuilder,
-    factoryAccount,
-    merchantAccount,
     "store"
   );
 
@@ -190,7 +189,7 @@ async function main() {
   // =====================
   console.log("\nOperating the POS instance...\n");
 
-  await operatePOS(posAddress, factoryBuilder, tokenAddresses);
+  await operatePOS(posAddress, factoryBuilder, storeBuilder, tokenAddresses);
 
   // =====================
   // Final Output

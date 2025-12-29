@@ -36,3 +36,15 @@ export const merchantAccount = new Account(
   MERCHANT_ADDRESS,
   MERCHANT_PRIVATE_KEY
 );
+
+export const cashierAccount = new Account(
+  provider,
+  MERCHANT_ADDRESS,
+  MERCHANT_PRIVATE_KEY
+);
+
+export const customerAccount = new Account(
+  provider,
+  MERCHANT_ADDRESS,
+  MERCHANT_PRIVATE_KEY
+);

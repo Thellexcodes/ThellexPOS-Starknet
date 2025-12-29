@@ -24,7 +24,7 @@ import {
 
 export abstract class BaseBuilder {
   // Core configuration and provider
-  protected config: BaseBuilderConfigArgs;
+  protected readonly config: BaseBuilderConfigArgs;
   protected provider: Provider;
   // Cached contracts to avoid repeated instantiation
   protected contracts: Map<string, Contract> = new Map();
@@ -55,6 +55,10 @@ export abstract class BaseBuilder {
       const fullPath = join(this.contractsPath, config.factoryContractPath);
       this.factoryClassHash = this.computeClassHash(fullPath);
     }
+  }
+
+  cloneConfig(): BaseBuilderConfigArgs {
+    return { ...this.config };
   }
 
   /**

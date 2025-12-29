@@ -57,3 +57,31 @@ export interface BuildCreatePOSArgs {
   merchant?: ContractAddress;
   storeName?: string;
 }
+
+export interface StoreDepositInfo {
+  /** Amount added since last poll */
+  delta: bigint;
+
+  /** Store balance after deposit */
+  newBalance: bigint;
+
+  /** Store balance before deposit */
+  previousBalance: bigint;
+}
+
+export interface WatchStoreDepositsParams {
+  /** Merchant that owns the POS */
+  merchantAddress: ContractAddress;
+
+  /** POS / Store contract address */
+  storeAddress: ContractAddress;
+
+  /** Token being monitored */
+  tokenAddress: ContractAddress;
+
+  /** Optional polling interval (ms). Default: 7000 */
+  pollIntervalMs?: number;
+
+  /** Callback invoked on positive balance delta */
+  onDeposit: (info: StoreDepositInfo) => Promise<void> | void;
+}

@@ -14,9 +14,6 @@ import { dump } from "./utils/dump";
 export async function createPOSInstance(
   factoryAddress: ContractAddress,
   factoryBuilder: FactoryBuilder,
-  factoryAccount: Account,
-  merchantAccount: Account,
-  storeClassHash: string,
   type: POSType = "store"
 ): Promise<ContractAddress> {
   console.log("\n🏗️ Creating new POS instance...");

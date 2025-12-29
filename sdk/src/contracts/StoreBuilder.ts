@@ -1,8 +1,13 @@
 import { Call, uint256 } from "starknet";
-import { ContractAddress } from "../types";
+import {
+  BaseBuilderConfigArgs,
+  ContractAddress,
+  WatchStoreDepositsParams,
+} from "../types";
 import { FactoryBuilder } from "./FactoryBuilder";
 import { AbstractStoreBuilder } from "./abstracts/AbstractStoreBuilder";
 import { BaseBuilder } from "../core/BaseBuilder";
+import { makeStoreCacheKey, storeBalanceCache } from "./constants";
 
 /**
  * StoreBuilder
@@ -19,7 +24,7 @@ import { BaseBuilder } from "../core/BaseBuilder";
  */
 export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
   /** Relative path to the compiled Store POS ABI JSON file */
-  private readonly STORE_ABI_PATH = "store_pos.json";
+  private readonly STORE_ABI_PATH = "pos_Store.contract_class.json";
 
   /**
    * Constructs a new StoreBuilder instance.
@@ -27,8 +32,11 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
    *
    * @param config - BaseBuilder configuration object
    */
-  constructor(config: any) {
-    super(config);
+  // constructor(config?: BaseBuilderConfigArgs) {
+  //   super(config!!);
+  // }
+  constructor(arg: FactoryBuilder) {
+    super(arg instanceof FactoryBuilder ? arg.cloneConfig() : arg);
   }
 
   // ===========================================================================
@@ -260,6 +268,7 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
   ): Promise<string> {
     const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
     const result = await contract.balance_of(token);
+    console.log({ result });
     return uint256.uint256ToBN(result).toString();
   }
 
@@ -283,7 +292,7 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
    * @param storeAddress - Store POS contract address
    * @returns Owner address
    */
-  async getOwner(storeAddress: ContractAddress): Promise<ContractAddress> {
+  async getOwner(storeAddress: ContractAddress) {
     const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
     const result = await contract.owner();
     return result as ContractAddress;
@@ -295,7 +304,7 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
    * @param storeAddress - Store POS contract address
    * @returns Treasury address
    */
-  async getTreasury(storeAddress: ContractAddress): Promise<ContractAddress> {
+  async getTreasury(storeAddress: ContractAddress) {
     const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
     const result = await contract.treasury();
     return result as ContractAddress;
@@ -311,7 +320,7 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
   async isSupportedToken(
     storeAddress: ContractAddress,
     token: ContractAddress
-  ): Promise<boolean> {
+  ) {
     // Token support is managed at factory level
     // We need factory address – attempt to read from contract if exposed
     try {
@@ -333,7 +342,7 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
    * @param storeAddress - Store POS contract address
    * @returns true if paused
    */
-  async isPaused(storeAddress: ContractAddress): Promise<boolean> {
+  async isPaused(storeAddress: ContractAddress) {
     const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
     const result = await contract.is_paused();
     return Boolean(result);
@@ -345,9 +354,101 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
    * @param storeAddress - Store POS contract address
    * @returns true if initialized
    */
-  async isInitialized(storeAddress: ContractAddress): Promise<boolean> {
+  async isInitialized(storeAddress: ContractAddress) {
     const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
     const result = await contract.is_initialized();
     return Boolean(result);
+  }
+
+  /**
+   * Polls Store contract balance_of(token)
+   * Detects external deposits without events
+   */
+  async watchStoreDeposits(params: {
+    merchantAddress: ContractAddress;
+    storeAddress: ContractAddress;
+    tokenAddress: ContractAddress;
+    pollIntervalMs?: number;
+    onDeposit: (info: {
+      delta: bigint;
+      newBalance: bigint;
+      previousBalance: bigint;
+    }) => Promise<void> | void;
+  }): Promise<void> {
+    const {
+      merchantAddress,
+      storeAddress,
+      tokenAddress,
+      pollIntervalMs = 7000,
+      onDeposit,
+    } = params;
+
+    const cacheKey = makeStoreCacheKey(
+      merchantAddress,
+      storeAddress,
+      tokenAddress
+    );
+
+    // --------------------------------------------------
+    // 1. INITIAL SNAPSHOT
+    // --------------------------------------------------
+    const initialRaw = await this.getContract(
+      storeAddress,
+      this.STORE_ABI_PATH
+    ).balance_of(tokenAddress);
+    const initialBalance = BigInt(initialRaw);
+
+    storeBalanceCache.set(cacheKey, initialBalance);
+
+    console.log("\n🔍 STORE BALANCE SNAPSHOT");
+    console.log(`   Merchant: ${merchantAddress}`);
+    console.log(`   Store: ${storeAddress}`);
+    console.log(`   Token: ${tokenAddress}`);
+    console.log(`   Raw balance: ${initialBalance.toString()}`);
+    console.log(`   Poll interval: ${pollIntervalMs}ms\n`);
+
+    // --------------------------------------------------
+    // 2. POLLING LOOP
+    // --------------------------------------------------
+    setInterval(async () => {
+      try {
+        const previousBalance = storeBalanceCache.get(cacheKey) ?? BigInt(0);
+
+        const currentRaw = await this.getContract(
+          storeAddress,
+          this.STORE_ABI_PATH
+        ).balance_of(tokenAddress);
+        const currentBalance = BigInt(currentRaw);
+
+        if (currentBalance === previousBalance) {
+          return;
+        }
+
+        const delta = currentBalance - previousBalance;
+
+        // Update cache immediately (idempotent safety)
+        storeBalanceCache.set(cacheKey, currentBalance);
+
+        if (delta <= BigInt(0)) {
+          return;
+        }
+
+        console.log("\n📈 STORE EXTERNAL DEPOSIT DETECTED");
+        console.log(`   Merchant: ${merchantAddress}`);
+        console.log(`   Store: ${storeAddress}`);
+        console.log(`   Token: ${tokenAddress}`);
+        console.log(`   Delta: +${delta.toString()}`);
+        console.log(`   New balance: ${currentBalance.toString()}`);
+        console.log(`   Time: ${new Date().toLocaleString()}\n`);
+
+        await onDeposit({
+          delta,
+          newBalance: currentBalance,
+          previousBalance,
+        });
+      } catch (err: any) {
+        console.error("⚠️ Store polling error:", err.message);
+      }
+    }, pollIntervalMs);
   }
 }

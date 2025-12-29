@@ -7,10 +7,16 @@ import {
   FACTORY_ACCOUNT_ADDRESS,
   FACTORY_PRIVATE_KEY,
   CONTRACTS_DIR,
+  factoryAccount,
 } from "../config";
 import { dump } from "../utils/dump";
 
 const ERC20_FILENAME = "pos_ERC20.contract_class.json"; // Your compiled ERC20 file
+
+export const compiledPath = join(CONTRACTS_DIR, ERC20_FILENAME);
+export const compiledContract = JSON.parse(
+  fs.readFileSync(compiledPath, "utf8")
+);
 
 export interface DeployedToken {
   address: string;
@@ -34,26 +40,18 @@ export async function deployERC20(
   console.log(`\nDeploying ERC20: ${name} (${symbol})`);
 
   const provider = new RpcProvider({ nodeUrl: NODE_URL });
-  const account = new Account(
-    provider,
-    FACTORY_ACCOUNT_ADDRESS,
-    FACTORY_PRIVATE_KEY
-  );
 
   try {
-    const compiledPath = join(CONTRACTS_DIR, ERC20_FILENAME);
-    const compiledContract = JSON.parse(fs.readFileSync(compiledPath, "utf8"));
-
     const classHash =
       "0x05ccacfef4a28b6d8ddd82a3dd161349337bc78371e08f13cc2d17c82c186d1e";
 
     // Declare if not already declared
-    await account.declareIfNot({
+    await factoryAccount.declareIfNot({
       contract: compiledContract,
       compiledClassHash: classHash,
     });
 
-    const { low, high } = uint256.bnToUint256(initialSupply);
+    const supplyUint256 = uint256.bnToUint256(initialSupply);
 
     // ABI-safe calldata compilation (handles ByteArray correctly)
     const callData = new CallData(compiledContract.abi);
@@ -61,20 +59,34 @@ export async function deployERC20(
       name,
       symbol,
       decimals,
-      low,
-      high,
-      account.address,
+      supplyUint256,
+      factoryAccount.address,
     ]);
 
-    const deployResponse = await account.deployContract({
+    const deployResponse = await factoryAccount.deployContract({
       classHash,
       constructorCalldata,
     });
 
-    await account.waitForTransaction(deployResponse.transaction_hash);
+    await factoryAccount.waitForTransaction(deployResponse.transaction_hash);
 
     console.log(`ERC20 deployed at: ${deployResponse.contract_address}`);
     console.log(`Tx: ${deployResponse.transaction_hash}`);
+
+    // -------------------- Balance check --------------------
+    const erc20 = new Contract(
+      compiledContract.abi,
+      deployResponse.contract_address,
+      factoryAccount
+    );
+
+    const balance = await erc20.balance_of(factoryAccount.address);
+
+    console.log(
+      `💰 Balance of factoryAccount: ${uint256
+        .uint256ToBN(balance)
+        .toString()} ${symbol}`
+    );
 
     return {
       address: deployResponse.contract_address!,

@@ -50,20 +50,22 @@ export class FactoryBuilder
 
   buildInitializeFactory(
     factoryAddress: ContractAddress,
-    treasury: ContractAddress,
-    feePercent: number,
-    taxPercent: number,
-    timeout: number,
-    minWithdrawalLimit: string
+    options: {
+      treasury: ContractAddress;
+      feePercent: number;
+      taxPercent: number;
+      timeout: number;
+      minWithdrawalLimit: number;
+    }
   ): Call {
     const contract = this.getContract(factoryAddress, this.FACTORY_ABI_PATH);
 
     return contract.populate("initialize", {
-      treasury,
-      fee_percent: uint256.bnToUint256(feePercent),
-      tax_percent: uint256.bnToUint256(taxPercent),
-      timeout,
-      min_withdrawal_limit: uint256.bnToUint256(minWithdrawalLimit),
+      treasury: options.feePercent,
+      fee_percent: uint256.bnToUint256(options.feePercent),
+      tax_percent: uint256.bnToUint256(options.taxPercent),
+      timeout: options.timeout,
+      min_withdrawal_limit: uint256.bnToUint256(options.minWithdrawalLimit),
     });
   }
 

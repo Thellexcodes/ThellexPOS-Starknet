@@ -10,14 +10,14 @@ import { ContractAddress } from "@thellex/pos-sdk";
 import { delay } from "./utils/delay";
 import { Account } from "starknet";
 import {
+  FACTORY_ADDRESS,
   MERCHANT_ADDRESS,
   MERCHANT_PRIVATE_KEY,
   merchantAccount,
 } from "./config";
 import { shortenAddress } from "./utils/shortenAddress";
-
-const UINT256_MAX =
-  "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+import { depositDetector } from "./utils/constants";
+import { DepositEvent } from "./types/events";
 
 async function main() {
   console.log("🚀 Starting Thellex POS Full Deployment & Demo\n");
@@ -86,13 +86,9 @@ async function main() {
   // =====================
   // 2. Deploy Factory
   // =====================
-  console.log("Deploying and initializing POS Factory...\n");
 
   const { factoryBuilder, factoryAccount, storeBuilder } =
     await deployAndInitializeFactory();
-
-  const factoryAddress: ContractAddress =
-    "0x7c183c3336b62234ff8ceb5d985f0247eace1ef0651853941ed77794c087621";
 
   // =====================
   // 📡 START EVENT LISTENER (NON-BLOCKING)
@@ -101,7 +97,7 @@ async function main() {
 
   // factoryBuilder
   //   .monitorEvents({
-  //     contractAddress: factoryAddress,
+  //     contractAddress: FACTORY_ADDRESS,
   //     eventNames: ["StorePOSCreated", "PersonalPOSCreated"],
   //     abiFilePath: "pos_Factory.contract_class.json",
   //     cancelToken: () => eventListenerControl.stop,
@@ -137,7 +133,7 @@ async function main() {
   console.log("Adding deployed tokens to factory supported list...\n");
 
   await manageFactorySettings(
-    factoryAddress,
+    FACTORY_ADDRESS,
     factoryBuilder,
     factoryAccount,
     tokenAddresses
@@ -149,7 +145,7 @@ async function main() {
   console.log("Creating new POS instance...\n");
 
   const posAddress = await createPOSInstance(
-    factoryAddress,
+    FACTORY_ADDRESS,
     factoryBuilder,
     "store"
   );
@@ -164,7 +160,7 @@ async function main() {
   for (const token of deployedTokens) {
     try {
       const isSupported = await factoryBuilder.isSupportedToken(
-        factoryAddress,
+        FACTORY_ADDRESS,
         token.address
       );
 
@@ -174,7 +170,7 @@ async function main() {
           token.address,
           factoryBuilder,
           factoryAccount,
-          factoryAddress
+          FACTORY_ADDRESS
         );
       }
     } catch (err) {
@@ -195,13 +191,34 @@ async function main() {
   // Final Output
   // =====================
   console.log("\n🎉 All operations completed successfully!");
-  console.log(`Factory: ${shortenAddress(factoryAddress)}`);
+  console.log(`Factory: ${shortenAddress(FACTORY_ADDRESS)}`);
   console.log(`POS:     ${shortenAddress(posAddress)}`);
   console.log("Tokens:");
 
   deployedTokens.forEach((t) =>
     console.log(`   • ${t.name} (${t.symbol}): ${shortenAddress(t.address)}`)
   );
+
+  // Somewhere else in your app (e.g., merchant backend)
+  depositDetector.on("depositDetected", async (event: DepositEvent) => {
+    console.log(
+      `\n🎯 Received deposit event for merchant ${event.merchantAddress}`
+    );
+    console.log(`   POS: ${event.posAddress}`);
+    console.log(`   Token: ${event.tokenAddress}`);
+    console.log(`   Amount: ${event.amount}`);
+
+    // // Auto-register the external deposit
+    // const registerCall = storeBuilder.buildRegisterExternalDeposit(
+    //   event.posAddress,
+    //   event.amount,
+    //   event.tokenAddress,
+    //   "0x...sender..." // track sender via events or off-chain
+    // );
+
+    // Sign off-chain with merchantAccount and submit
+    console.log(`   → Ready to register_external_deposit (sign & send)`);
+  });
 }
 
 main().catch((error) => {

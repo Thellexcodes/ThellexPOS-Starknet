@@ -46,11 +46,13 @@ export abstract class AbstractFactoryBuilder {
    */
   abstract buildInitializeFactory(
     factoryAddress: ContractAddress,
-    treasury: ContractAddress,
-    feePercent: number,
-    taxPercent: number,
-    timeout: number,
-    minWithdrawalLimit: string
+    options: {
+      treasury: ContractAddress;
+      feePercent: number;
+      taxPercent: number;
+      timeout: number;
+      minWithdrawalLimit: number;
+    }
   ): Call;
 
   /**

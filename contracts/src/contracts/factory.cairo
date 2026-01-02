@@ -4,7 +4,7 @@ pub mod Factory {
     use starknet::storage::StoragePointerReadAccess;
     use starknet::storage::StoragePointerWriteAccess;
     use core::num::traits::Zero;
-    use crate::interfaces::i_pos_factory::IFactory;
+    use crate::interfaces::i_factory::IFactory;
     use starknet::{ContractAddress, get_caller_address, get_contract_address, get_tx_info, class_hash::ClassHash, syscalls::deploy_syscall};
     use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
 
@@ -21,7 +21,7 @@ pub mod Factory {
         personal_pos_of: Map<ContractAddress, ContractAddress>,
         store_pos_of: Map<(ContractAddress, ContractAddress), bool>,
         admins: Map<ContractAddress, bool>,
-        supported_tokens: Map<ContractAddress, bool>,
+      supported_tokens: Map<ContractAddress, bool>,
     }
 
     #[event]

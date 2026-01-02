@@ -1,4 +1,4 @@
-import { Call } from "starknet";
+import { BigNumberish, Call } from "starknet";
 import { ContractAddress, WatchStoreDepositsParams } from "../../types";
 
 /**
@@ -50,7 +50,7 @@ export abstract class AbstractStoreBuilder {
   abstract buildApproveTransaction(
     storeAddress: ContractAddress,
     txId: string
-  ): Call;
+  ): Call | any;
 
   /**
    * Builds a reject_transaction call using an off-chain signature.
@@ -160,8 +160,15 @@ export abstract class AbstractStoreBuilder {
     storeAddress: ContractAddress,
     amount: string,
     token: ContractAddress,
-    sender: ContractAddress
-  ): Call;
+    sender: ContractAddress,
+    callDataOptions: {
+      nonce: BigNumberish;
+      deadline: BigNumberish;
+      pubkey: BigNumberish;
+      sig_r: BigNumberish;
+      sig_s: BigNumberish;
+    }
+  ): Call | any;
 
   /**
    * Retrieves deposit details for a specific transaction ID.
@@ -246,4 +253,9 @@ export abstract class AbstractStoreBuilder {
    * Uses polling + internal caching.
    */
   abstract watchStoreDeposits(params: WatchStoreDepositsParams): Promise<void>;
+
+  abstract getNonce(
+    storeAddress: ContractAddress,
+    signerAddress: ContractAddress
+  ): Promise<string>;
 }

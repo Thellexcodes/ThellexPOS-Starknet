@@ -76,10 +76,8 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
    * @param storeAddress - Store POS contract address
    * @param txId - Deposit transaction ID to approve
    */
-  buildApproveTransaction(storeAddress: ContractAddress, txId: string): Call {
-    throw new Error(
-      "approve_transaction requires off-chain signature (signer, nonce, deadline, pubkey, sig_r, sig_s)."
-    );
+  async buildApproveTransaction(storeAddress: ContractAddress, txId: string) {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
   }
 
   /**
@@ -220,15 +218,26 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
    * @param token - Token contract address
    * @param sender - Original depositor address
    */
-  buildRegisterExternalDeposit(
+  async buildRegisterExternalDeposit(
     storeAddress: ContractAddress,
     amount: string,
     token: ContractAddress,
     sender: ContractAddress
-  ): Call {
-    throw new Error(
-      "register_external_deposit requires off-chain signature (signer, nonce, deadline, pubkey, sig_r, sig_s)."
-    );
+  ) {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+    const amountU256 = uint256.bnToUint256(amount);
+
+    return contract.populate("register_external_deposit", {
+      amount: amountU256,
+      token,
+      sender,
+      signer: "0x0",
+      nonce: "0",
+      deadline: "0",
+      pubkey: "0x0",
+      sig_r: "0x0",
+      sig_s: "0x0",
+    });
   }
 
   // ===========================================================================
@@ -268,7 +277,6 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
   ): Promise<string> {
     const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
     const result = await contract.balance_of(token);
-    console.log({ result });
     return uint256.uint256ToBN(result).toString();
   }
 
@@ -450,5 +458,20 @@ export class StoreBuilder extends BaseBuilder implements AbstractStoreBuilder {
         console.error("⚠️ Store polling error:", err.message);
       }
     }, pollIntervalMs);
+  }
+
+  async getNonce(
+    storeAddress: ContractAddress,
+    signerAddress: ContractAddress
+  ) {
+    const contract = this.getContract(storeAddress, this.STORE_ABI_PATH);
+
+    try {
+      const result = await contract.get_nonce(signerAddress);
+      return BigInt(result).toString();
+    } catch (error: any) {
+      console.error("Failed to fetch nonce:", error.message);
+      throw new Error(`Could not retrieve nonce for ${signerAddress}`);
+    }
   }
 }

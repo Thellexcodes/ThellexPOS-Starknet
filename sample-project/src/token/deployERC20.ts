@@ -42,13 +42,13 @@ export async function deployERC20(
   const provider = new RpcProvider({ nodeUrl: NODE_URL });
 
   try {
-    const classHash =
-      "0x05ccacfef4a28b6d8ddd82a3dd161349337bc78371e08f13cc2d17c82c186d1e";
+    const erc20ClassHash =
+      "0x5ccacfef4a28b6d8ddd82a3dd161349337bc78371e08f13cc2d17c82c186d1e";
 
     // Declare if not already declared
     await factoryAccount.declareIfNot({
       contract: compiledContract,
-      compiledClassHash: classHash,
+      compiledClassHash: erc20ClassHash,
     });
 
     const supplyUint256 = uint256.bnToUint256(initialSupply);
@@ -64,7 +64,7 @@ export async function deployERC20(
     ]);
 
     const deployResponse = await factoryAccount.deployContract({
-      classHash,
+      classHash: erc20ClassHash,
       constructorCalldata,
     });
 

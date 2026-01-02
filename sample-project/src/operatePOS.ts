@@ -4,192 +4,77 @@ import {
   StoreBuilder,
 } from "@thellex/pos-sdk";
 import { LRUCache } from "lru-cache";
-import { customerAccount, factoryAccount, merchantAccount } from "./config";
-import { Contract } from "starknet";
+import {
+  customerAccount,
+  factoryAccount,
+  merchantAccount,
+  NODE_URL,
+} from "./config";
+import {
+  Account,
+  Call,
+  Contract,
+  hash,
+  RpcProvider,
+  uint256,
+  num,
+} from "starknet";
 import { compiledContract } from "./token/deployERC20";
+import { depositDetector, SELECTORS } from "./utils/constants";
+import { DepositEvent } from "./types/events";
 import { dump } from "./utils/dump";
 
-// /**
-//  * Simple async delay helper
-//  */
-// const delay = (ms: number) =>
-//   new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-// /**
-//  * ERC20 balance cache
-//  * Key: `${posAddress}_${tokenAddress}`
-//  */
-// const erc20BalanceCache = new LRUCache<string, bigint>({
-//   max: 1000,
-//   ttl: 1000 * 60 * 10,
-//   updateAgeOnGet: true,
-// });
-
-// function makeCacheKey(
-//   posAddress: ContractAddress,
-//   tokenAddress: ContractAddress
-// ): string {
-//   return `${posAddress.toLowerCase()}_${tokenAddress.toLowerCase()}`;
-// }
-
-// /**
-//  * FULL BLOWN Thellex Store POS Demo & ERC20 Monitoring Solution
-//  */
-// export async function operatePOS(
-//   posAddress: ContractAddress,
-//   factoryBuilder: FactoryBuilder,
-//   storeBuilder: StoreBuilder,
-//   tokenAddresses: ContractAddress[]
-// ) {
-//   console.log("\n🚀 THELLEX STORE POS — FULL LIFECYCLE DEMO & MONITOR");
-//   console.log(`   POS Address: ${posAddress}`);
-//   console.log(`   Monitoring ${tokenAddresses.length} token(s):`);
-//   tokenAddresses.forEach((t, i) => console.log(`      [${i + 1}] ${t}`));
-
-//   const demoToken = tokenAddresses[0];
-//   if (!demoToken) {
-//     throw new Error("At least one token address is required");
-//   }
-
-//   // ========================================================================
-//   // ERC20 CONTRACTS
-//   // ========================================================================
-
-//   const factoryErc20 = new Contract(
-//     compiledContract.abi,
-//     demoToken,
-//     factoryAccount
-//   );
-
-//   const customerErc20 = new Contract(
-//     compiledContract.abi,
-//     demoToken,
-//     customerAccount
-//   );
-
-//   // ========================================================================
-//   // 0. SEED CUSTOMER WITH TOKENS
-//   // ========================================================================
-
-//   console.log("\n0. Seeding customer with demo tokens");
-
-//   await factoryErc20.transfer(
-//     customerAccount.address as ContractAddress,
-//     "100"
-//   );
-
-//   console.log("   ✅ Customer funded with 100 tokens");
-
-//   // ========================================================================
-//   // 1. INITIAL ERC20 BALANCE SNAPSHOT (SOURCE OF TRUTH)
-//   // ========================================================================
-
-//   console.log("\n🔍 ERC20 INITIAL BALANCE CHECK");
-
-//   const initialErc20Balance = BigInt(
-//     await customerErc20.balance_of(posAddress)
-//   );
-
-//   console.log(`   POS ERC20 balance: ${initialErc20Balance.toString()}`);
-
-//   const balanceKey = makeCacheKey(posAddress, demoToken);
-//   erc20BalanceCache.set(balanceKey, initialErc20Balance);
-
-//   // ========================================================================
-//   // 2. REAL-TIME ERC20 MONITORING LOOP (READ-ONLY)
-//   // ========================================================================
-
-//   const pollIntervalMs = 7_000;
-//   let initialDepositDetected = false;
-//   let followUpTransferTriggered = false;
-
-//   setInterval(async () => {
-//     try {
-//       const previousBalance = erc20BalanceCache.get(balanceKey) ?? BigInt(0);
-//       const currentBalance = BigInt(await customerErc20.balance_of(posAddress));
-
-//       if (currentBalance === previousBalance) {
-//         console.log(
-//           `   No ERC20 balance change — ${new Date().toLocaleTimeString()}`
-//         );
-//         return;
-//       }
-
-//       const delta = currentBalance - previousBalance;
-//       erc20BalanceCache.set(balanceKey, currentBalance);
-
-//       console.log("\n📈 ERC20 BALANCE CHANGE DETECTED");
-//       console.log(`   Token: ${demoToken}`);
-//       console.log(`   Δ ${delta.toString()}`);
-//       console.log(`   New Balance: ${currentBalance.toString()}`);
-//       console.log(`   Time: ${new Date().toLocaleString()}`);
-
-//       if (!initialDepositDetected && delta > BigInt(0)) {
-//         initialDepositDetected = true;
-//         console.log("🟢 Initial deposit confirmed");
-//       }
-//     } catch (err) {
-//       console.error("⚠️ ERC20 polling error:", err);
-//     }
-//   }, pollIntervalMs);
-
-//   // ========================================================================
-//   // 3. REACTIVE FOLLOW-UP TRANSFER (OUTSIDE MONITOR)
-//   // ========================================================================
-
-//   const waitForDepositThenTriggerTransfer = async () => {
-//     while (!initialDepositDetected) {
-//       await delay(1_000);
-//     }
-
-//     if (followUpTransferTriggered) return;
-//     followUpTransferTriggered = true;
-
-//     console.log("\n🚀 Triggering follow-up ERC20 transfer to POS");
-
-//     const followUpTx = await factoryErc20.transfer(posAddress, "15");
-
-//     console.log("   ✅ Follow-up transfer sent");
-//     console.log(`   Tx Hash: ${followUpTx}`);
-//   };
-
-//   void waitForDepositThenTriggerTransfer();
-
-//   // ========================================================================
-//   // 4. DELAYED INITIAL EXTERNAL TRANSFER
-//   // ========================================================================
-
-//   console.log("\n1. Waiting 60 seconds before initial external deposit to POS");
-//   await delay(60_000);
-
-//   console.log("   ⏳ Sending initial external deposit to POS");
-
-//   const initialTransferTx = await customerErc20.transfer(posAddress, "15");
-
-//   console.log("   ✅ External transfer sent");
-//   console.log(`   Tx Hash: ${initialTransferTx}`);
-
-//   // ========================================================================
-//   // 5. KEEP PROCESS ALIVE
-//   // ========================================================================
-
-//   await new Promise(() => {});
-// }
+import fs from "fs";
+import path from "path";
+import {
+  computeTestSignUserHash,
+  signStoreOffchainMessage,
+  signTestSignUserHash,
+  toBigIntSafe,
+  toUint256Parts,
+} from "./utils/signers";
 
 /**
- * Simple async delay helper
+ * Persistent file for lastSafeBlock
  */
-const delay = (ms: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, ms));
+const LAST_BLOCK_FILE = path.join(__dirname, "last_safe_block.json");
+
+/**
+ * Load lastSafeBlock from file
+ */
+function loadLastSafeBlock(): number {
+  try {
+    if (fs.existsSync(LAST_BLOCK_FILE)) {
+      const data = JSON.parse(fs.readFileSync(LAST_BLOCK_FILE, "utf-8"));
+      const block = Number(data.block);
+      console.log(`   📂 Loaded lastSafeBlock from file: ${block}`);
+      return block;
+    }
+  } catch (err: any) {
+    console.warn(`   ⚠️  Failed to load last_safe_block.json: ${err.message}`);
+    console.log("   → Starting from block 0");
+  }
+  return 0;
+}
+
+/**
+ * Save lastSafeBlock to file
+ */
+function saveLastSafeBlock(block: number) {
+  try {
+    fs.writeFileSync(LAST_BLOCK_FILE, JSON.stringify({ block }, null, 2));
+    console.log(`   💾 Saved lastSafeBlock: ${block}`);
+  } catch (err: any) {
+    console.error(`   ❌ Failed to save last_safe_block.json: ${err.message}`);
+  }
+}
 
 /**
  * ERC20 raw balance cache
- * Key: `${merchantAddress}_${posAddress}_${tokenAddress}` (all lowercase)
- * Supports multiple merchants safely
  */
 const erc20BalanceCache = new LRUCache<string, bigint>({
   max: 1000,
-  ttl: 1000 * 60 * 10, // 10 minutes
+  ttl: 1000 * 60 * 10,
   updateAgeOnGet: true,
 });
 
@@ -201,9 +86,10 @@ function makeCacheKey(
   return `${merchantAddress.toLowerCase()}_${posAddress.toLowerCase()}_${tokenAddress.toLowerCase()}`;
 }
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
- * FULL BLOWN Thellex Store POS Demo & External Deposit Monitor
- * Monitors raw ERC20 balance of the POS for external deposits
+ * FULL Thellex Store POS — Auto External Deposit Registration
  */
 export async function operatePOS(
   posAddress: ContractAddress,
@@ -213,145 +99,268 @@ export async function operatePOS(
 ) {
   const merchantAddress = merchantAccount.address as ContractAddress;
 
-  console.log("\n🚀 THELLEX STORE POS — EXTERNAL DEPOSIT MONITOR");
+  console.log("\n🚀 THELLEX STORE POS — AUTO EXTERNAL DEPOSIT REGISTRATION");
   console.log(`   Merchant: ${merchantAddress}`);
   console.log(`   POS Address: ${posAddress}`);
 
   const demoToken = tokenAddresses[0];
-  if (!demoToken) {
-    throw new Error("At least one token address is required");
-  }
+  if (!demoToken) throw new Error("Token required");
   console.log(`   Monitoring token: ${demoToken}\n`);
 
-  // ========================================================================
-  // ERC20 CONTRACTS (direct style — no changes to your pattern)
-  // ========================================================================
+  // Contracts
   const factoryErc20 = new Contract(
     compiledContract.abi,
     demoToken,
-    factoryAccount // assuming factoryAccount is your funding account
+    factoryAccount
   );
-
   const customerErc20 = new Contract(
     compiledContract.abi,
     demoToken,
     customerAccount
   );
 
-  // ========================================================================
-  // 0. SEED CUSTOMER WITH TOKENS
-  // ========================================================================
-  console.log("0. Seeding customer with demo tokens");
-  await factoryErc20.transfer(
-    customerAccount.address as ContractAddress,
-    "200"
-  );
-  console.log("   ✅ Customer funded with 200 tokens\n");
+  const provider =
+    factoryBuilder.provider || new RpcProvider({ nodeUrl: NODE_URL });
 
   // ========================================================================
-  // 1. INITIAL BALANCE SNAPSHOT
+  // 0. Seed customer
   // ========================================================================
-  console.log("🔍 Taking initial raw ERC20 balance snapshot");
-
-  const initialBalance = BigInt(await customerErc20.balance_of(posAddress));
-  console.log(`   POS raw balance: ${initialBalance.toString()}`);
-
-  const balanceKey = makeCacheKey(merchantAddress, posAddress, demoToken);
-  erc20BalanceCache.set(balanceKey, initialBalance);
+  console.log("0. Seeding customer with tokens");
+  try {
+    await factoryErc20.transfer(
+      customerAccount.address as ContractAddress,
+      "1000"
+    );
+    console.log("   ✅ Customer funded with 1000 tokens\n");
+  } catch (err: any) {
+    console.warn("   ⚠️  Seeding failed (already funded?):", err.message);
+  }
 
   // ========================================================================
-  // 2. REAL-TIME BALANCE MONITORING (7-second poll)
+  // 1. Initial balance & load persistent block
   // ========================================================================
-  const pollIntervalMs = 7000;
-  let initialDepositDetected = false;
-  let followUpTransferTriggered = false;
+  let initialBalance: bigint;
+  try {
+    initialBalance = BigInt(await customerErc20.balance_of(posAddress));
+  } catch (err: any) {
+    console.error("Failed to read initial balance:", err.message);
+    initialBalance = BigInt(0);
+  }
 
-  // storeBuilder.watchStoreDeposits({
-  //   merchantAddress: merchantAccount.address as ContractAddress,
-  //   storeAddress: posAddress,
-  //   tokenAddress: demoToken,
-  //   pollIntervalMs: pollIntervalMs,
-  //   onDeposit: (info) => {
-  //     dump({ info });
-  //   },
-  // });
+  const cacheKey = makeCacheKey(merchantAddress, posAddress, demoToken);
+  erc20BalanceCache.set(cacheKey, initialBalance);
+  console.log(`   Initial raw balance: ${initialBalance.toString()}`);
+
+  let lastSafeBlock = loadLastSafeBlock();
+  console.log(`   Block scanning starts from: ${lastSafeBlock}\n`);
+
+  // ========================================================================
+  // 2. Block scanning — detects sender + auto-registers
+  // ========================================================================
+  const scanIntervalMs = 8000;
 
   setInterval(async () => {
     try {
-      const previousBalance = erc20BalanceCache.get(balanceKey) ?? BigInt(0);
-      const currentBalance = BigInt(await customerErc20.balance_of(posAddress));
+      const latestBlock = await provider.getBlockNumber();
 
-      if (currentBalance === previousBalance) {
-        console.log(`   No change — ${new Date().toLocaleTimeString()}`);
+      // 10-block overlap for safety
+      const startBlock = Math.max(lastSafeBlock + 1, latestBlock - 9);
+
+      if (startBlock > latestBlock) {
         return;
       }
 
-      const delta = currentBalance - previousBalance;
-      erc20BalanceCache.set(balanceKey, currentBalance);
+      console.log(
+        `\n🔄 Scanning blocks ${startBlock} → ${latestBlock} (10-block overlap)`
+      );
 
-      console.log("\n📈 RAW ERC20 BALANCE CHANGE DETECTED (EXTERNAL DEPOSIT)");
-      console.log(`   Token: ${demoToken}`);
-      console.log(`   Change: ${delta > 0 ? "+" : ""}${delta.toString()}`);
-      console.log(`   New Raw Balance: ${currentBalance.toString()}`);
-      console.log(`   Time: ${new Date().toLocaleString()}`);
-      console.log(`   Merchant: ${merchantAddress}`);
-      console.log(`   POS: ${posAddress}\n`);
+      for (let blockNum = startBlock; blockNum <= latestBlock; blockNum++) {
+        let block: any;
+        try {
+          block = await provider.getBlockWithTxs(blockNum);
+        } catch (err: any) {
+          console.error(`   Failed to fetch block ${blockNum}:`, err.message);
+          continue;
+        }
 
-      if (!initialDepositDetected && delta > BigInt(0)) {
-        initialDepositDetected = true;
-        console.log("🟢 First external deposit confirmed\n");
+        for (const tx of block.transactions) {
+          if (tx.type !== "INVOKE") continue;
+          if (!tx.calldata || tx.calldata.length < 7) continue;
+
+          const transferSelector = hash.getSelectorFromName("transfer");
+          if (tx.calldata[2] !== transferSelector) continue;
+
+          const recipient = tx.calldata[4];
+          if (recipient.toLowerCase() !== posAddress.toLowerCase()) continue;
+
+          const amountLow = tx.calldata[5];
+          const amountHigh = tx.calldata[6] || "0";
+          const amountBN = uint256.uint256ToBN({
+            low: amountLow,
+            high: amountHigh,
+          });
+          const amountStr = amountBN.toString();
+
+          console.log("\n💰 EXTERNAL DEPOSIT DETECTED!");
+          console.log(`   Sender: ${tx.sender_address}`);
+          console.log(`   Amount: ${amountStr}`);
+          console.log(`   Tx Hash: ${tx.transaction_hash}`);
+          console.log(`   Block: ${blockNum}\n`);
+
+          // === AUTO REGISTER ===
+          try {
+            console.log("   🔄 Auto-registering deposit...");
+
+            const nonceStr = toBigIntSafe(
+              await storeBuilder.getNonce(
+                posAddress,
+                merchantAccount.address as ContractAddress
+              )
+            );
+            // const nonce = BigInt(nonceStr);
+            const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
+
+            const tokenAddress = demoToken;
+            const senderAddress = tx.sender_address;
+            const signerAddress = merchantAccount.address;
+            const contractAddress = posAddress;
+            const hash = computeTestSignUserHash(
+              SELECTORS.register_external_deposit,
+              [
+                amountLow.toString(),
+                amountHigh.toString(),
+                tokenAddress,
+                senderAddress,
+                signerAddress,
+                nonceStr,
+                deadline,
+              ]
+            );
+            const sig = signTestSignUserHash(hash);
+
+            dump([
+              hash,
+              sig,
+              amountStr,
+              amountLow.toString(),
+              amountHigh.toString(),
+              tokenAddress,
+              senderAddress,
+              signerAddress,
+              nonceStr,
+              deadline,
+              sig.sig_r, // r
+              sig.sig_s, // s
+            ]);
+
+            const amountU256 = uint256.bnToUint256(amountStr);
+
+            const call: Call = {
+              contractAddress,
+              entrypoint: SELECTORS.register_external_deposit,
+              calldata: [
+                amountU256.low, // e.g., "0x1a2b3c..."
+                amountU256.high, // e.g., "0x0" or "0x4d5e6f...",
+                tokenAddress,
+                senderAddress,
+                signerAddress,
+                nonceStr, //nonce
+                deadline,
+                sig.sig_r, // r
+                sig.sig_s, // s
+              ],
+            };
+
+            const txn = await factoryBuilder.sendTransaction(
+              factoryAccount,
+              call
+            );
+
+            dump({ txn });
+
+            // const nonce = BigInt(5);
+            // const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
+
+            // const hash = computeTestSignUserHash(SELECTORS.test_sign_user, [
+            //   1,
+            //   merchantAccount.address as ContractAddress,
+            //   nonce,
+            //   deadline,
+            // ]);
+
+            // const registerTx = await factoryBuilder.sendTransaction(
+            //   merchantAccount,
+            //   call
+            // );
+            // console.log(
+            //   `   ✅ register_external_deposit submitted! Tx: ${registerTx}`
+            // );
+
+            // const { low: nonceLow, high: nonceHigh } = toUint256Parts(nonce);
+            // const { low: deadlineLow, high: deadlineHigh } =
+            //   toUint256Parts(nonce);
+
+            // const nonceU64 = BigInt(nonce);
+            // const deadlineU64 = BigInt(deadline);
+
+            // let contractAddress = posAddress;
+
+            // const call: Call = {
+            //   contractAddress,
+            //   entrypoint: SELECTORS.test_sign_user,
+            //   calldata: [
+            //     merchantAccount.address, // user
+            //     nonceU64,
+            //     deadlineU64,
+            //     sig.sig_r, // r
+            //     sig.sig_s, // s
+            //   ],
+            // };
+
+            // const tx = await factoryBuilder.sendTransaction(
+            //   factoryAccount,
+            //   call
+            // );
+
+            // dump({ tx });
+
+            // const registerTx = await factoryBuilder.sendTransaction(
+            //   merchantAccount,
+            //   call
+            // );
+            // console.log(
+            //   `   ✅ register_external_deposit submitted! Tx: ${registerTx}`
+            // );
+            console.log(`   → Balance will be credited (net after fee)\n`);
+          } catch (regErr: any) {
+            console.error("   ❌ Auto-registration failed:", regErr.message);
+          }
+        }
       }
 
-      console.log("   NEXT STEP:");
-      console.log(
-        "     → Call register_external_deposit() with the delta amount"
-      );
-      console.log("     → Sign with merchant account to credit POS balance\n");
+      // Only save on full success
+      lastSafeBlock = latestBlock;
+      saveLastSafeBlock(lastSafeBlock);
     } catch (err: any) {
-      console.error("⚠️ Polling error:", err.message);
+      console.error("⚠️ Critical scan error (retrying):", err.message);
+      // Do NOT save lastSafeBlock → will re-scan on next cycle
     }
-  }, pollIntervalMs);
+  }, scanIntervalMs);
 
   // ========================================================================
-  // 3. REACTIVE FOLLOW-UP TRANSFER
+  // 3. Demo deposit
   // ========================================================================
-  const waitForDepositThenTriggerFollowUp = async () => {
-    while (!initialDepositDetected) {
-      await delay(1000);
-    }
+  console.log("⏳ Sending demo external deposit in 2 seconds...");
+  await delay(2000);
 
-    if (followUpTransferTriggered) return;
-    followUpTransferTriggered = true;
+  try {
+    console.log("   Sending 100 tokens to POS");
+    const tx = await customerErc20.transfer(posAddress, "100");
+    console.log(`   ✅ Sent! Tx: ${tx.transaction_hash || tx}`);
+    console.log(`   → Will be auto-registered soon\n`);
+  } catch (err: any) {
+    console.warn("   Demo transfer failed:", err.message);
+  }
 
-    console.log("\n🚀 Triggering follow-up external transfer (15 tokens)");
-    const tx = await factoryErc20.transfer(posAddress, "15");
-    console.log(`   ✅ Follow-up sent! Tx: ${tx.transaction_hash || tx}`);
-    console.log(`   → Will be detected in next poll cycle\n`);
-  };
-
-  void waitForDepositThenTriggerFollowUp();
-
-  // ========================================================================
-  // 4. INITIAL EXTERNAL DEPOSIT (after delay)
-  // ========================================================================
-  console.log(
-    "\n⏳ Waiting 60 seconds before sending initial external deposit..."
-  );
-  await delay(60_000);
-
-  console.log("   Sending initial external deposit (20 tokens) to POS");
-  const initialTx = await customerErc20.transfer(posAddress, "20");
-  console.log(
-    `   ✅ Initial external deposit sent! Tx: ${
-      initialTx.transaction_hash || initialTx
-    }`
-  );
-  console.log(
-    `   → Monitor will detect soon → then register_external_deposit needed\n`
-  );
-
-  // ========================================================================
-  // 5. KEEP PROCESS ALIVE
-  // ========================================================================
   await new Promise(() => {});
 }

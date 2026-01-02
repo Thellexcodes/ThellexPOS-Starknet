@@ -25,7 +25,7 @@ import {
 export abstract class BaseBuilder {
   // Core configuration and provider
   protected readonly config: BaseBuilderConfigArgs;
-  protected provider: Provider;
+  provider: Provider;
   // Cached contracts to avoid repeated instantiation
   protected contracts: Map<string, Contract> = new Map();
   // Paths and pre-computed values

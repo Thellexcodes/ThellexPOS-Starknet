@@ -80,36 +80,37 @@ export async function manageFactorySettings(
   // === 3. Query & Display Final State ===
   console.log("\nFetching current factory state...");
 
-  // const [treasury, feePercent, taxPercent, timeout] = await Promise.all([
-  //   factoryBuilder.getTreasury(factoryAddress),
-  //   factoryBuilder.getFeePercent(factoryAddress),
-  //   factoryBuilder.getTaxPercent(factoryAddress),
-  //   factoryBuilder.getTimeout(factoryAddress),
-  //   // factoryBuilder.getPaused(factoryAddress), // assuming you have this getter
-  // ]);
+  const [treasury, feePercent, taxPercent, timeout] = await Promise.all([
+    factoryBuilder.getTreasury(factoryAddress),
+    factoryBuilder.getFeePercent(factoryAddress),
+    factoryBuilder.getTaxPercent(factoryAddress),
+    factoryBuilder.getTimeout(factoryAddress),
+    // factoryBuilder.getPaused(factoryAddress), // assuming you have this getter
+  ]);
 
-  // // Check support for first token if any
-  // const sampleToken = tokenAddresses[0];
-  // const sampleSupported = sampleToken
-  //   ? await factoryBuilder.isSupportedToken(factoryAddress, sampleToken)
-  //   : false;
+  // Check support for first token if any
+  const sampleToken = tokenAddresses[0];
+  const sampleSupported = sampleToken
+    ? await factoryBuilder.isSupportedToken(factoryAddress, sampleToken)
+    : false;
 
-  // console.log("\n✅ Final Factory State:");
-  // const timeoutSeconds =
-  //   typeof timeout === "number" ? timeout : parseInt(`${timeout}`, 10);
+  console.log("\n✅ Final Factory State:");
+  const timeoutSeconds =
+    typeof timeout === "number" ? timeout : parseInt(`${timeout}`, 10);
+  console.log({ treasury });
 
-  // console.table({
-  //   Treasury: shortenAddress(treasury),
-  //   "Fee Percent": `${feePercent / 100}%`,
-  //   "Tax Percent": `${taxPercent / 100}%`,
-  //   Timeout: `${timeoutSeconds} seconds (~${Math.round(
-  //     timeoutSeconds / 3600
-  //   )} hours)`,
-  //   // Paused: isPaused ? "Yes" : "No",
-  //   "Sample Token Supported": sampleToken
-  //     ? `${shortenAddress(sampleToken)} → ${sampleSupported ? "Yes" : "No"}`
-  //     : "N/A",
-  // });
+  console.table({
+    Treasury: shortenAddress(treasury.toString()),
+    "Fee Percent": `${feePercent / 100}%`,
+    "Tax Percent": `${taxPercent / 100}%`,
+    Timeout: `${timeoutSeconds} seconds (~${Math.round(
+      timeoutSeconds / 3600
+    )} hours)`,
+    // Paused: isPaused ? "Yes" : "No",
+    "Sample Token Supported": sampleToken
+      ? `${shortenAddress(sampleToken)} → ${sampleSupported ? "Yes" : "No"}`
+      : "N/A",
+  });
 }
 
 // Helper: shorten address for clean logs

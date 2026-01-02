@@ -1,5 +1,7 @@
 #[starknet::contract]
 pub mod Store {
+    use crate::contracts::erc20::ERC20::{ IERC20Dispatcher, IERC20DispatcherTrait};
+    use core::ecdsa::recover_public_key;
     use core::ecdsa::check_ecdsa_signature;
     use core::pedersen::pedersen;
     use starknet::contract_address_const;
@@ -8,10 +10,10 @@ pub mod Store {
     use starknet::storage::StoragePointerReadAccess;
     use starknet::{ ContractAddress, get_caller_address, get_contract_address, get_block_timestamp };
     use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
-    use crate::interfaces::i_pos_factory::{
+    use crate::interfaces::i_factory::{
         IFactoryDispatcher, IFactoryDispatcherTrait
     };
-    use crate::interfaces::i_store_pos::{IStore, DepositInfo, Role} ;
+    use crate::interfaces::i_store::{IStore, DepositInfo, Role} ;
 
     #[storage]
     struct Storage {
@@ -179,7 +181,16 @@ pub mod Store {
             self.emit(BalanceCredited { amount: net, token: info.token });
         }
 
-        fn reject_transaction(ref self: ContractState, tx_id: felt252, signer: ContractAddress, nonce: u64, deadline: u64, pubkey: felt252, sig_r: felt252, sig_s: felt252) { 
+        fn reject_transaction(
+            ref self: ContractState, 
+            tx_id: felt252, 
+            signer: ContractAddress, 
+            nonce: u64, 
+            deadline: u64, 
+            pubkey: felt252, 
+            sig_r: felt252, 
+            sig_s: felt252
+        ) { 
 
             assert(self.nonces.read(signer) == nonce, 'Invalid nonce');
             assert(get_block_timestamp() <= deadline, 'Signature expired');
@@ -355,56 +366,92 @@ pub mod Store {
             self.emit(WithdrawalToOwner { amount, token });
         }
 
-        fn register_external_deposit(
-            ref self: ContractState,
-            amount: u256,
-            token: ContractAddress,
-            sender: ContractAddress,
-            signer: ContractAddress,
-            nonce: u64,
-            deadline: u64,
-            pubkey: felt252,
-            sig_r: felt252,
-            sig_s: felt252
-        ) -> felt252 {
-            InternalImpl::_ensure_active(@self);
+      fn register_external_deposit(
+          ref self: ContractState,
+          amount: u256,
+          token: ContractAddress,
+          sender: ContractAddress,
+          signer: ContractAddress,
+          nonce: u64,
+          deadline: u64,
+          sig_r: felt252,
+          sig_s: felt252
+      ) -> felt252 {
+          // Early checks
+          InternalImpl::_ensure_active(@self);
+          assert(get_block_timestamp() <= deadline, 'Signature expired');
+          assert(self.nonces.read(signer) == nonce, 'Invalid nonce');
 
-            assert(self.nonces.read(signer) == nonce, 'Invalid nonce');
-            assert(get_block_timestamp() <= deadline, 'Signature expired');
+          // Compute message hash efficiently (chained Pedersen)
+          let mut hash = 0;
+          hash = pedersen(hash, amount.low.into());
+          hash = pedersen(hash, amount.high.into());
+          hash = pedersen(hash, token.into());
+          hash = pedersen(hash, sender.into());
+          hash = pedersen(hash, signer.into());
+          hash = pedersen(hash, nonce.into());
+          let message_hash = pedersen(hash, deadline.into());
 
-            let mut calldata_hash = pedersen(0, amount.low.into());
-            calldata_hash = pedersen(calldata_hash, amount.high.into());
-            calldata_hash = pedersen(calldata_hash, token.into());
-            calldata_hash = pedersen(calldata_hash, sender.into());
+          // Recover public key and verify signature
+          let recovered_pubkey = recover_public_key(
+              message_hash: message_hash,
+              signature_r: sig_r,
+              signature_s: sig_s,
+              y_parity: false
+          ).unwrap();
 
-            let mut hash = pedersen(1, signer.into());
-            hash = pedersen(hash, nonce.into());
-            hash = pedersen(hash, deadline.into());
-            hash = pedersen(hash, selector!("register_external_deposit"));
-            hash = pedersen(hash, calldata_hash);
+          assert(
+              check_ecdsa_signature(message_hash, recovered_pubkey, sig_r, sig_s),
+              'Invalid signature'
+          );
 
-            assert(check_ecdsa_signature(hash, pubkey, sig_r, sig_s), 'Invalid signature');
+          // Authorization
+          InternalImpl::_assert_manager_or_owner(ref self, signer);
 
-            self.nonces.write(signer, nonce + 1);
-            InternalImpl::_assert_manager_or_owner(ref self, signer);
+          // Token validation and balance check
+          let token_dispatcher = IERC20Dispatcher { contract_address: token };
 
-            let factory = IFactoryDispatcher { contract_address: self.factory.read() };
-            assert(factory.is_supported_token(token), 'Unsupported token');
+          let contract_balance: u256 = token_dispatcher.balance_of(get_contract_address());
+          assert(contract_balance >= amount, 'Insufficient tokens');
 
-            let tx_id: felt252 = self.transaction_counter.read().try_into().unwrap();
-            self.transaction_counter.write(self.transaction_counter.read() + 1);
+          let factory = IFactoryDispatcher { contract_address: self.factory.read() };
+          assert(factory.is_supported_token(token), 'Unsupported token');
 
-            let fee = amount * self.fee_percent.read() / 10000;
-            let net = amount - fee;
-            self.balances.write(token, self.balances.read(token) + net);
+          // Fee calculation
+          let fee = amount * self.fee_percent.read() / 10000;
+          let net = amount - fee;
 
-            let info = DepositInfo { amount, token, sender, timestamp: get_block_timestamp(), approved: true };
-            self.deposits.write(tx_id, info);
+          // Transfer fee to treasury
+          let treasury = self.treasury.read(); 
+          if !treasury.is_zero() && fee > 0 {
+              token_dispatcher.transfer(treasury, fee.into());
+          }
 
-            self.emit(ExternalDepositRegistered { sender, amount, token, tx_id });
-            self.emit(BalanceCredited { amount: net, token });
-            tx_id
-        }
+          // Credit net amount to internal balance
+          self.balances.write(token, self.balances.read(token) + net);
+
+          // Increment nonce
+          self.nonces.write(signer, nonce + 1);
+
+          // Generate and store transaction ID
+          let tx_id: felt252 = self.transaction_counter.read().try_into().unwrap();
+          self.transaction_counter.write(self.transaction_counter.read() + 1);
+
+          let info = DepositInfo {
+              amount,
+              token,
+              sender,
+              timestamp: get_block_timestamp(),
+              approved: true
+          };
+          self.deposits.write(tx_id, info);
+
+          // Emit events
+          self.emit(ExternalDepositRegistered { sender, amount, token, tx_id });
+          self.emit(BalanceCredited { amount: net, token });
+
+          tx_id
+      }
 
         fn batch_withdraw(
             ref self: ContractState,
@@ -476,9 +523,35 @@ pub mod Store {
         fn owner(self: @ContractState) -> ContractAddress { self.owner.read() }
         fn balance_of(self: @ContractState, token: ContractAddress) -> u256 { self.balances.read(token) }
         fn get_deposit(self: @ContractState, tx_id: felt252) -> DepositInfo { self.deposits.read(tx_id) }
-        fn is_paused(self: @ContractState) -> bool { self.paused.read() }fn grant_role(ref self: ContractState, user: ContractAddress, role: crate::interfaces::i_store_pos::Role) {}
+        fn is_paused(self: @ContractState) -> bool { self.paused.read() }fn grant_role(ref self: ContractState, user: ContractAddress, role: crate::interfaces::i_store::Role) {}
         fn get_role(self: @ContractState, user: ContractAddress) -> Role { self.roles.read((get_contract_address(), user)) }
         fn is_initialized(self: @ContractState) -> bool { return self.initialized.read(); }
+        fn get_nonce(self: @ContractState, signer: ContractAddress) -> u64 {
+            self.nonces.read(signer)
+        }
+       
+       fn test_sign_user(
+          ref self: ContractState,
+          user: ContractAddress,
+          nonce: u64,
+          deadline: u64,
+          sig_r: felt252,
+          sig_s: felt252,
+      ) -> bool {
+          let mut hash = pedersen(1, user.into());
+          hash = pedersen(hash, nonce.into());
+          hash = pedersen(hash, deadline.into());
+          hash = pedersen(hash, selector!("test_sign_user"));
+
+          let recovered_pubkey = recover_public_key(
+              message_hash: hash,
+              signature_r: sig_r,
+              signature_s: sig_s,
+              y_parity: false
+          ).unwrap();
+
+          check_ecdsa_signature(hash, recovered_pubkey, sig_r, sig_s)
+        }
     }
 
     #[generate_trait]

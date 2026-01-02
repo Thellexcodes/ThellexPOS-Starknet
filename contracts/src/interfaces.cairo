@@ -1,2 +1,2 @@
-pub mod i_pos_factory;
-pub mod i_store_pos;
+pub mod i_factory;
+pub mod i_store;

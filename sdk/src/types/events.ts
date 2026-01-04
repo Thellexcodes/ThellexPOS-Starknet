@@ -95,7 +95,7 @@ export interface PaymentRequestFulfilledEvent {
   token: string;
 }
 
-export interface ExternalDepositRegisteredEvent {
+export interface TransactionApprovedEvent {
   sender: string;
   amount: { low: bigint; high: bigint };
   token: string;
@@ -131,7 +131,7 @@ export type StoreEvent =
   | { type: "WithdrawalToOwner"; data: WithdrawalToOwnerEvent }
   | { type: "PaymentRequestCreated"; data: PaymentRequestCreatedEvent }
   | { type: "PaymentRequestFulfilled"; data: PaymentRequestFulfilledEvent }
-  | { type: "ExternalDepositRegistered"; data: ExternalDepositRegisteredEvent }
+  | { type: "TransactionApproved"; data: TransactionApprovedEvent }
   | { type: "RefundSent"; data: RefundSentEvent }
   | { type: "RoleGranted"; data: RoleGrantedEvent }
   | { type: "RoleRevoked"; data: RoleRevokedEvent };

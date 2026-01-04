@@ -1,0 +1,66 @@
+// src/errors.cairo
+
+#[derive(Drop, Copy, PartialEq)]
+pub enum StoreError {
+    NotInitialized,
+    Paused,
+    ZeroAmount,
+    ZeroAddress,
+    DuplicateTxId,
+    UnsupportedToken,
+    InvalidSignature,
+    SignatureExpired,
+    InvalidNonce,
+    InvalidOrApprovedTx,
+    InsufficientContractBalance,
+    InsufficientInternalBalance,
+    BelowMinWithdrawalLimit,
+    ArraysLengthMismatch,
+    EmptyBatch,
+    RequestInactive,
+    AmountMismatch,
+    TokenMismatch,
+    RequestIdTaken,
+    OnlyOwner,
+    OnlyManagerOrOwner,
+    CashierOrHigherRequired,
+    CannotRevokeOwner,
+    InvalidRole,
+    NotTimedOut,
+    InvalidReceiver,
+    RejectionLimitReached,
+}
+
+impl StoreErrorIntoFelt252 of Into<StoreError, felt252> {
+    fn into(self: StoreError) -> felt252 {
+        match self {
+            StoreError::NotInitialized => selector!("STORE_NOT_INITIALIZED"),
+            StoreError::Paused => selector!("STORE_PAUSED"),
+            StoreError::ZeroAmount => selector!("STORE_ZERO_AMOUNT"),
+            StoreError::ZeroAddress => selector!("STORE_ZERO_ADDRESS"),
+            StoreError::DuplicateTxId => selector!("STORE_DUPLICATE_TX_ID"),
+            StoreError::UnsupportedToken => selector!("STORE_UNSUPPORTED_TOKEN"),
+            StoreError::InvalidSignature => selector!("STORE_INVALID_SIGNATURE"),
+            StoreError::SignatureExpired => selector!("STORE_SIGNATURE_EXPIRED"),
+            StoreError::InvalidNonce => selector!("STORE_INVALID_NONCE"),
+            StoreError::InvalidOrApprovedTx => selector!("STORE_INVALID_OR_APPROVED_TX"),
+            StoreError::InsufficientContractBalance => selector!("STORE_INSUFFICIENT_CONTRACT_BALANCE"),
+            StoreError::InsufficientInternalBalance => selector!("STORE_INSUFFICIENT_INTERNAL_BALANCE"),
+            StoreError::BelowMinWithdrawalLimit => selector!("STORE_BELOW_MIN_WITHDRAWAL"),
+            StoreError::ArraysLengthMismatch => selector!("STORE_ARRAYS_LENGTH_MISMATCH"),
+            StoreError::EmptyBatch => selector!("STORE_EMPTY_BATCH"),
+            StoreError::RequestInactive => selector!("STORE_REQUEST_INACTIVE"),
+            StoreError::AmountMismatch => selector!("STORE_AMOUNT_MISMATCH"),
+            StoreError::TokenMismatch => selector!("STORE_TOKEN_MISMATCH"),
+            StoreError::RequestIdTaken => selector!("STORE_REQUEST_ID_TAKEN"),
+            StoreError::OnlyOwner => selector!("STORE_ONLY_OWNER"),
+            StoreError::OnlyManagerOrOwner => selector!("STORE_ONLY_MANAGER_OR_OWNER"),
+            StoreError::CashierOrHigherRequired => selector!("STORE_CASHIER_OR_HIGHER_REQUIRED"),
+            StoreError::CannotRevokeOwner => selector!("STORE_CANNOT_REVOKE_OWNER"),
+            StoreError::InvalidRole => selector!("STORE_INVALID_ROLE"),
+            StoreError::NotTimedOut => selector!("STORE_NOT_TIMED_OUT"),
+            StoreError::InvalidReceiver => selector!("STORE_INVALID_RECEIVER"),
+            StoreError::RejectionLimitReached => selector!("STORE_REJECTION_LIMIT_REACHED"),
+        }
+    }
+}

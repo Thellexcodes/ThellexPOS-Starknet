@@ -70,20 +70,19 @@ pub trait IStore<TState> {
     fn reject_transaction(
       ref self: TState, 
       tx_id: felt252, 
+      sender: ContractAddress,
       signer: ContractAddress,
       nonce: u64,
       deadline: u64,
-      pubkey: felt252,
       sig_r: felt252,
       sig_s: felt252
     );
 
-    // Refund unapproved deposits after timeout
-    // fn auto_refund(ref self: TState, tx_id: felt252, refund_to: ContractAddress);
-     fn auto_refund_signed(
-        ref self: TState,
-        tx_id: felt252,
-        refund_to: ContractAddress,
+    fn auto_reject_unregistered_deposit(
+      ref self: TState,
+        token: ContractAddress,
+        amount: u256,
+        recipient: ContractAddress,
         signer: ContractAddress,
         nonce: u64,
         deadline: u64,
@@ -107,7 +106,8 @@ pub trait IStore<TState> {
         ref self: TState,
         request_id: felt252,
         amount: u256,
-        token: ContractAddress
+        token: ContractAddress,
+        sender: ContractAddress
     );
 
     fn register_external_deposit(
@@ -148,6 +148,11 @@ pub trait IStore<TState> {
             sig_r: felt252, 
             sig_s: felt252,
           ) -> bool;
+
+    fn block_address(ref self: TState, user: ContractAddress);
+    fn unblock_address(ref self: TState, user: ContractAddress);
+    fn is_blocked(ref self: TState, user: ContractAddress) -> bool;
+    fn get_rejection_count(ref self: TState, user: ContractAddress) -> u8;
 }
 
 // ========================

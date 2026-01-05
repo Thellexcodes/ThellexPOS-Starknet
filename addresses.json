@@ -1,7 +1,7 @@
 {
   "devnet": {
     "FactoryClassHash": "0x0097099c0a226a084572d79b0f28e827b485b6c46d4ac6a39ea207228e25d102",
-    "StoreClassHash": "0x6def27ada52ff3a5edcbee850dc9c2aea2c88fccbeb764ec46c3d9514282be8",
+    "StoreClassHash": "0x2561bbada1b569ce8a33e47cccfe4ebc33be3827ae33c84695cbc44a9a4ff21",
     "ERC20ClassHash": "0x05ccacfef4a28b6d8ddd82a3dd161349337bc78371e08f13cc2d17c82c186d1e",
     "FactoryAddress": "0x05c7c9e7e4666c5a1990b924c16a0521fecd812c7f7a5061c22cd51702717dc0"
   }

@@ -9,7 +9,6 @@ All commands are **profile-aware** (e.g. `devnet`, `sepolia`, `mainnet`).
 
 - `scarb`
 - `sncast >= 0.48`
-- `jq`
 - A running Starknet devnet (for `devnet` profile)
 - Properly configured `snfoundry.toml` profiles
 
@@ -57,11 +56,11 @@ Example contents:
 
 ```json
 {
-  "POSFactory": {
-    "class_hash": "0x..."
-  },
-  "StorePOS": {
-    "class_hash": "0x..."
+  "devnet": {
+    "FactoryClassHash": "...",
+    "StoreClassHash": "...",
+    "ERC20ClassHash": "...",
+    "FactoryAddress": "..."
   }
 }
 ```

@@ -9,7 +9,7 @@ CONTRACTS_DIR="$ROOT_DIR/contracts"
 ARTIFACTS_FILE="$ROOT_DIR/addresses.json"
 
 # Contracts to declare (must match exact names in Scarb.toml)
-CONTRACTS=("Factory" "Store" "ERC20")
+CONTRACTS=("Factory" "Store" "ERC20" "OutsideExecutor")  # ← Added OutsideExecutor
 
 echo "Declaring contracts on profile: $PROFILE"
 echo "Working in: $CONTRACTS_DIR"
@@ -43,7 +43,7 @@ for CONTRACT in "${CONTRACTS[@]}"; do
     if echo "$OUTPUT" | grep -q "Class.*already declared"; then
       echo "Class already declared – extracting existing class hash from error message..."
 
-      # Extract the hash mentioned in the error: 0x04004ea25de5078814dec3f9f34f42ec1ede5f75c01e9ecbe558d53bdc84affb
+      # Extract the hash mentioned in the error
       CLASS_HASH=$(echo "$OUTPUT" | grep -oE '0x[0-9a-fA-F]{64,}' | head -1)
 
       if [ -z "$CLASS_HASH" ]; then
@@ -65,12 +65,13 @@ for CONTRACT in "${CONTRACTS[@]}"; do
 
   echo "   → Using class hash: $CLASS_HASH"
 
-  # Map to JSON key
+  # Map contract name to JSON key
   case "$CONTRACT" in
-    Factory) KEY="FactoryClassHash" ;;
-    Store)   KEY="StoreClassHash" ;;
-    ERC20)   KEY="ERC20ClassHash" ;;
-    *)       echo "Unknown contract: $CONTRACT"; exit 1 ;;
+    Factory)          KEY="FactoryClassHash" ;;
+    Store)            KEY="StoreClassHash" ;;
+    ERC20)            KEY="ERC20ClassHash" ;;
+    OutsideExecutor)  KEY="OutsideExecutorClassHash" ;;  # ← Added
+    *)                echo "Unknown contract: $CONTRACT"; exit 1 ;;
   esac
 
   # Save to addresses.json

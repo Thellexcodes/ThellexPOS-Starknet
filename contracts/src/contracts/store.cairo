@@ -5,7 +5,6 @@ pub mod Store {
     use core::ecdsa::recover_public_key;
     use core::ecdsa::check_ecdsa_signature;
     use core::pedersen::pedersen;
-    use starknet::contract_address_const;
     use core::num::traits::Zero;
     use starknet::storage::StoragePointerWriteAccess;
     use starknet::storage::StoragePointerReadAccess;
@@ -13,6 +12,8 @@ pub mod Store {
     use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
     use crate::interfaces::i_factory::{ IFactoryDispatcher, IFactoryDispatcherTrait };
     use crate::interfaces::i_store::{IStore, DepositInfo, Role} ;
+
+    const MAX_REJECTIONS: u8 = 5;
 
     #[storage]
     struct Storage {
@@ -31,7 +32,8 @@ pub mod Store {
         transaction_counter: u256,
         roles: Map<(ContractAddress, ContractAddress), Role>,
         rejection_count: Map<ContractAddress, u8>,
-        nonces: Map<ContractAddress, u64>, 
+        nonces: Map<ContractAddress, u64>,
+        blocked: Map<ContractAddress, bool>, 
     }
 
     #[derive(Drop, Serde, starknet::Store)]
@@ -57,6 +59,10 @@ pub mod Store {
         RefundSent: RefundSent,
         RoleGranted: RoleGranted,
         RoleRevoked: RoleRevoked,
+        UnregisteredDepositRejected: UnregisteredDepositRejected,
+        AddressBlocked: AddressBlocked,
+        AddressUnblocked: AddressUnblocked,
+        DepositForceTaxed: DepositForceTaxed,
     }
 
     #[derive(Drop, starknet::Event)] struct Initialized { owner: ContractAddress, treasury: ContractAddress }
@@ -71,6 +77,10 @@ pub mod Store {
     #[derive(Drop, starknet::Event)] struct RefundSent { original_sender: ContractAddress, refund_receiver: ContractAddress, amount: u256, token: ContractAddress, tx_id: felt252 }
     #[derive(Drop, starknet::Event)] struct RoleGranted { user: ContractAddress, role: Role, granted_by: ContractAddress }
     #[derive(Drop, starknet::Event)] struct RoleRevoked { user: ContractAddress, role: Role, revoked_by: ContractAddress }
+    #[derive(Drop, starknet::Event)] struct UnregisteredDepositRejected { token: ContractAddress, amount: u256, refund_amount: u256, tax: u256, recipient: ContractAddress}
+    #[derive(Drop, starknet::Event)] struct AddressBlocked { user: ContractAddress, blocked_by: ContractAddress }
+    #[derive(Drop, starknet::Event)] struct AddressUnblocked { user: ContractAddress, unblocked_by: ContractAddress }
+    #[derive(Drop, starknet::Event)] struct DepositForceTaxed { tx_id: felt252, sender: ContractAddress, amount: u256, tax: u256, token: ContractAddress }
 
     #[constructor]
     fn constructor(
@@ -102,8 +112,9 @@ pub mod Store {
      #[abi(embed_v0)]
     impl StoreImpl of IStore<ContractState> {
 
+      //[x] enforce signature verification
       fn revoke_role(ref self: ContractState, user: ContractAddress) {
-          self._assert_only_owner();
+          self._assert_only_owner(user);
           let current = InternalImpl::get_role(@self,user);
           assert(current != Role::None && current != Role::Owner, StoreError::CannotRevokeOwner.into());
 
@@ -125,6 +136,7 @@ pub mod Store {
         InternalImpl::_ensure_active(@self);
 
         // Basic validations
+        assert(tx_id != 0, StoreError::InvalidOrApprovedTx.into());
         assert(amount > 0, StoreError::ZeroAmount.into());
         assert(self.deposits.read(tx_id).amount == 0, StoreError::DuplicateTxId.into());
 
@@ -164,10 +176,10 @@ pub mod Store {
             approved: false
         };
         self.deposits.write(tx_id, info);
+        self.rejection_count.write(self.owner.read(), 0);
 
         // Emit event
         self.emit(PaymentReceived { sender: signer, amount, token, tx_id });
-        self.emit(TransactionApproved { sender: signer, amount: info.amount, token: info.token, tx_id });
       }
 
       fn approve_transaction(
@@ -179,170 +191,166 @@ pub mod Store {
         sig_r: felt252,
         sig_s: felt252
       ) {
-        InternalImpl::_ensure_active(@self);
+          InternalImpl::_ensure_active(@self);
+          InternalImpl::_assert_manager_or_owner(ref self, signer);
 
-        assert(get_block_timestamp() <= deadline, StoreError::SignatureExpired.into());
-        assert(self.nonces.read(signer) == nonce, StoreError::InvalidNonce.into());
+          assert(get_block_timestamp() <= deadline, StoreError::SignatureExpired.into());
+          assert(self.nonces.read(signer) == nonce, StoreError::InvalidNonce.into());
 
-        let mut info = self.deposits.read(tx_id);
-        assert(info.amount > 0 && !info.approved, StoreError::InvalidOrApprovedTx.into());
+          let mut info = self.deposits.read(tx_id);
+          assert(info.amount > 0 && !info.approved, StoreError::InvalidOrApprovedTx.into());
 
-        // Compute message hash
-        let mut hash = 0;
-        hash = pedersen(hash, tx_id);
-        hash = pedersen(hash, signer.into());
-        hash = pedersen(hash, nonce.into());
-        let message_hash = pedersen(hash, deadline.into());
+          // Compute message hash
+          let mut hash = 0;
+          hash = pedersen(hash, tx_id);
+          hash = pedersen(hash, signer.into());
+          hash = pedersen(hash, nonce.into());
+          let message_hash = pedersen(hash, deadline.into());
 
-        // Recover and verify signature
-        let recovered_pubkey = recover_public_key(
-          message_hash: message_hash,
-          signature_r: sig_r,
-          signature_s: sig_s,
-          y_parity: false
-        ).unwrap();
+          // Recover and verify signature
+          let recovered_pubkey = recover_public_key(
+            message_hash: message_hash,
+            signature_r: sig_r,
+            signature_s: sig_s,
+            y_parity: false
+          ).unwrap();
 
-        assert(
-          check_ecdsa_signature(message_hash, recovered_pubkey, sig_r, sig_s),
-          StoreError::InvalidSignature.into()
-        );
+          assert(
+            check_ecdsa_signature(message_hash, recovered_pubkey, sig_r, sig_s),
+            StoreError::InvalidSignature.into()
+          );
 
-        // Authorization check
-        InternalImpl::_assert_manager_or_owner(ref self, signer);
+          // Consume nonce to prevent replay
+          self.nonces.write(signer, nonce + 1);
 
-        // Consume nonce to prevent replay
-        self.nonces.write(signer, nonce + 1);
+          // Calculate fee and net amount
+          let fee_percent = self.fee_percent.read();
+          let fee = info.amount * fee_percent / 10000;
+          let net = info.amount - fee;
 
-        // Calculate fee and net amount
-        let fee_percent = self.fee_percent.read();
-        let fee = info.amount * fee_percent / 10000;
-        let net = info.amount - fee;
+          // Transfer fee to treasury if configured
+          let token_dispatcher = IERC20Dispatcher { contract_address: info.token };
+          let treasury = self.treasury.read();
+          if !treasury.is_zero() && fee > 0 {
+            token_dispatcher.transfer(treasury, fee);
+          }
 
-        // Transfer fee to treasury if configured
-        let token_dispatcher = IERC20Dispatcher { contract_address: info.token };
-        let treasury = self.treasury.read();
-        if !treasury.is_zero() && fee > 0 {
-          token_dispatcher.transfer(treasury, fee);
+          // Verify contract has sufficient tokens
+          let contract_balance: u256 = token_dispatcher.balance_of(get_contract_address());
+          assert(contract_balance >= info.amount, StoreError::InsufficientInternalBalance.into());
+
+          // Credit internal balance with net amount
+          self.balances.write(info.token, self.balances.read(info.token) + net);
+
+          // Mark transaction as approved and prevent re-processing
+          info.approved = true;
+          info.amount = 0;
+          self.deposits.write(tx_id, info);
+
+          // Reset rejection count (if part of multi-approval logic)
+          self.rejection_count.write(self.owner.read(), 0);
+
+          // Emit events
+          self.emit(BalanceCredited { amount: net, token: info.token });
+          self.emit(TransactionApproved { sender: signer, amount: info.amount, token: info.token, tx_id });
         }
 
-        // Verify contract has sufficient tokens
-        let contract_balance: u256 = token_dispatcher.balance_of(get_contract_address());
-        assert(contract_balance >= info.amount, StoreError::InsufficientInternalBalance.into());
-
-        // Credit internal balance with net amount
-        self.balances.write(info.token, self.balances.read(info.token) + net);
-
-        // Mark transaction as approved and prevent re-processing
-        info.approved = true;
-        info.amount = 0; // Zero amount to prevent double-crediting
-        self.deposits.write(tx_id, info);
-
-        // Reset rejection count (if part of multi-approval logic)
-        self.rejection_count.write(self.owner.read(), 0);
-
-        // Emit events
-        self.emit(BalanceCredited { amount: net, token: info.token });
-        self.emit(TransactionApproved { sender: signer, amount: info.amount, token: info.token, tx_id });
-        }
-
-        fn reject_transaction(
-            ref self: ContractState, 
-            tx_id: felt252, 
-            signer: ContractAddress, 
-            nonce: u64, 
-            deadline: u64, 
-            pubkey: felt252, 
-            sig_r: felt252, 
-            sig_s: felt252
-        ) { 
-            assert(self.nonces.read(signer) == nonce, StoreError::InvalidNonce.into());
-            assert(get_block_timestamp() <= deadline, StoreError::SignatureExpired.into());
-
-            let calldata_hash = pedersen(0, tx_id);
-
-            let mut hash = pedersen(1, signer.into());
-            hash = pedersen(hash, nonce.into());
-            hash = pedersen(hash, deadline.into());
-            hash = pedersen(hash, selector!("reject_transaction"));
-            hash = pedersen(hash, calldata_hash);
-
-            assert(check_ecdsa_signature(hash, pubkey, sig_r, sig_s), StoreError::InvalidSignature.into());
-
-            self.nonces.write(signer, nonce + 1);
-            InternalImpl::_assert_manager_or_owner(ref self, signer);
-
-            let info = self.deposits.read(tx_id);
-            assert(info.amount > 0 && !info.approved, StoreError::InvalidOrApprovedTx.into());
-
-            let mut count = self.rejection_count.read(self.owner.read());
-            assert(count < 2 || self.balances.read(info.token) > 0, StoreError::RejectionLimitReached.into());
-            count += 1;
-            self.rejection_count.write(self.owner.read(), count);
-
-            IERC20Dispatcher { contract_address: info.token }.transfer(info.sender, info.amount);
-            self.deposits.write(tx_id, DepositInfo { amount: 0, ..info });
-
-            self.emit(PaymentRejected { sender: info.sender, amount: info.amount, token: info.token, tx_id });
-        }
-
-         fn auto_refund_signed(
+         fn reject_transaction(
             ref self: ContractState,
             tx_id: felt252,
-            refund_to: ContractAddress,
+            sender:ContractAddress,
             signer: ContractAddress,
             nonce: u64,
             deadline: u64,
             sig_r: felt252,
             sig_s: felt252
         ) {
-           InternalImpl::_ensure_active(@self);
+            let mut info = self.deposits.read(tx_id);
+            assert(info.amount > 0 && !info.approved, StoreError::InvalidOrApprovedTx.into());
 
-            // Replay protection
-            assert(self.nonces.read(signer) == nonce, StoreError::InvalidNonce.into());
+            let mut count = self.rejection_count.read(signer);
+            count += 1;
+
+            let token_dispatcher = IERC20Dispatcher { contract_address: info.token };
+
+            if count > MAX_REJECTIONS {
+                let tax = info.amount * self.tax_percent.read() / 10000;
+                let refund_amount = info.amount - tax;
+
+                let treasury = self.treasury.read();
+                if !treasury.is_zero() && tax > 0 {
+                    token_dispatcher.transfer(treasury, tax);
+                }
+                if refund_amount > 0 {
+                    token_dispatcher.transfer(info.sender, refund_amount);
+                }
+
+                self.deposits.write(tx_id, DepositInfo { amount: 0, ..info });
+                self.rejection_count.write(signer, 0);
+
+                self._assert_only_owner(signer); 
+
+                self.emit(DepositForceTaxed { tx_id, sender: info.sender, amount: info.amount, tax, token: info.token });
+                self.emit(RefundSent { original_sender: info.sender, refund_receiver: info.sender, amount: refund_amount, token: info.token, tx_id });
+            } else {
+                // Normal rejection
+                token_dispatcher.transfer(info.sender, info.amount);
+                self.deposits.write(tx_id, DepositInfo { amount: 0, ..info });
+                self.rejection_count.write(signer, count);
+                self.emit(PaymentRejected { sender: info.sender, amount: info.amount, token: info.token, tx_id });
+            }
+        }
+
+        fn auto_reject_unregistered_deposit(
+            ref self: ContractState,
+            token: ContractAddress,
+            amount: u256,
+            recipient: ContractAddress,
+            signer: ContractAddress,
+            nonce: u64,
+            deadline: u64,
+            sig_r: felt252,
+            sig_s: felt252
+        ) {
+            InternalImpl::_ensure_active(@self);
+
+            assert(amount > 0, StoreError::ZeroAmount.into());
+            assert(!recipient.is_zero(), StoreError::ZeroAddress.into());
+            assert(!token.is_zero(), StoreError::ZeroAddress.into());
             assert(get_block_timestamp() <= deadline, StoreError::SignatureExpired.into());
+            assert(self.nonces.read(signer) == nonce, StoreError::InvalidNonce.into());
 
-            // Calldata hash: tx_id + refund_to
-            let mut calldata_hash = pedersen(0, tx_id);
-            calldata_hash = pedersen(calldata_hash, refund_to.into());
-
-            // Message hash
-            let mut hash = pedersen(1, signer.into());
+            // Simple structured message hash
+            let mut hash = pedersen(0, token.into());
+            hash = pedersen(hash, amount.low.into());
+            hash = pedersen(hash, amount.high.into());
+            hash = pedersen(hash, recipient.into());
             hash = pedersen(hash, nonce.into());
-            hash = pedersen(hash, deadline.into());
-            hash = pedersen(hash, selector!("auto_refund"));
-            hash = pedersen(hash, calldata_hash);
+            let message_hash = pedersen(hash, deadline.into());
 
-            // Recover and verify signature
-            let pubkey = recover_public_key(
-              message_hash: hash,
-              signature_r: sig_r,
-              signature_s: sig_s,
-              y_parity: false
-            ).unwrap();
+            let pubkey = recover_public_key(message_hash, sig_r, sig_s, false).unwrap();
+            assert(check_ecdsa_signature(message_hash, pubkey, sig_r, sig_s), StoreError::InvalidSignature.into());
 
-            // Verify signature
-            assert(check_ecdsa_signature(hash, pubkey, sig_r, sig_s), StoreError::InvalidSignature.into());
+            self._assert_only_owner(signer);
 
-            // Consume nonce
             self.nonces.write(signer, nonce + 1);
 
-            // Verify role (only owner or manager can trigger auto-refund)
-            InternalImpl::_assert_manager_or_owner(ref self, signer);
+            let token_dispatcher = IERC20Dispatcher { contract_address: token };
+            let contract_balance = token_dispatcher.balance_of(get_contract_address());
+            assert(contract_balance >= amount, StoreError::InsufficientContractBalance.into());
 
-            let info = self.deposits.read(tx_id);
-            assert(info.amount > 0 && !info.approved, StoreError::InvalidOrApprovedTx.into());
-            assert(get_block_timestamp() >= info.timestamp + self.timeout.read(), 'Not timed out');
-            assert(refund_to.is_non_zero(), StoreError::InvalidReceiver.into());
+            let tax = amount * self.tax_percent.read() / 10000;
+            let refund_amount = if tax > 0 { amount - tax } else { amount };
 
-            let tax = info.amount * self.tax_percent.read() / 10000;
-            let refund_amount = info.amount - tax;
+            token_dispatcher.transfer(recipient, refund_amount);
 
-            // IERC20Dispatcher { contract_address: info.token }.transfer(refund_to, refund_amount);
-            self.deposits.write(tx_id, DepositInfo { amount: 0, ..info });
-            self.rejection_count.write(self.owner.read(), self.rejection_count.read(self.owner.read()) + 1);
-
-            self.emit(AutoRefunded { sender: info.sender, amount: refund_amount, tax, token: info.token, tx_id });
-            self.emit(RefundSent { original_sender: info.sender, refund_receiver: refund_to, amount: refund_amount, token: info.token, tx_id });
+            if tax > 0 {
+                let treasury = self.treasury.read();
+                if !treasury.is_zero() {
+                    token_dispatcher.transfer(treasury, tax);
+                }
+            }
+            self.emit(UnregisteredDepositRejected { token, amount, refund_amount: refund_amount, tax, recipient });
         }
 
         fn create_payment_request(
@@ -356,7 +364,7 @@ pub mod Store {
           sig_r: felt252,
           sig_s: felt252
         ) {
-            self._assert_cashier_or_above();
+            self._assert_cashier_or_above(signer);
             let factory = IFactoryDispatcher { contract_address: self.factory.read() };
             assert(factory.is_supported_token(token), StoreError::UnsupportedToken.into());
             assert(amount > 0, StoreError::ZeroAmount.into());
@@ -372,20 +380,19 @@ pub mod Store {
             ref self: ContractState,
             request_id: felt252,
             amount: u256,
-            token: ContractAddress
+            token: ContractAddress,
+            sender: ContractAddress
         ) {
-            assert(self.initialized.read(), 'Not initialized');
-            assert(!self.paused.read(), 'Contract paused');
-            assert(amount > 0, 'Invalid amount');
-            assert(token.is_non_zero(), 'Invalid token');
+            assert(self.initialized.read(), StoreError::NotInitialized.into());
+            assert(!self.paused.read(), StoreError::Paused.into());
+            assert(amount > 0, StoreError::ZeroAmount.into());
+            assert(token.is_non_zero(), StoreError::ZeroAddress.into());
 
             let request = self.payment_requests.read(request_id);
-            assert(request.active, 'Invalid or inactive request');
-            assert(request.amount == amount, 'Amount mismatch');
-            assert(request.token == token, 'Token mismatch');
-
-            assert(IFactoryDispatcher { contract_address: self.factory.read() }
-                .is_supported_token(token), StoreError::UnsupportedToken.into());
+            assert(request.active, StoreError::InvalidOrApprovedTx.into());
+            assert(request.amount == amount, StoreError::AmountMismatch.into());
+            assert(request.token == token, StoreError::TokenMismatch.into());
+            assert(IFactoryDispatcher { contract_address: self.factory.read()}.is_supported_token(token), StoreError::UnsupportedToken.into());
 
             let sender = get_caller_address();
             let fee = amount * self.fee_percent.read() / 10000;
@@ -394,8 +401,8 @@ pub mod Store {
             self.balances.write(token, self.balances.read(token) + net_amount);
             self.payment_requests.write(request_id, PaymentRequest {
                 amount: 0,
-                token: contract_address_const::<0>(),
-                requester: contract_address_const::<0>(),
+                token: token,
+                requester: sender,
                 active: false
             });
             self.rejection_count.write(self.owner.read(), 0);
@@ -436,7 +443,7 @@ pub mod Store {
 
           assert(check_ecdsa_signature(message_hash, pubkey, sig_r, sig_s), StoreError::InvalidSignature.into());
 
-          InternalImpl::_assert_manager_or_owner(ref self, signer);
+          InternalImpl::_assert_only_owner(ref self, signer);
           self.nonces.write(signer, nonce + 1);
 
           assert(amount >= self.min_withdrawal_limit.read(), StoreError::BelowMinWithdrawalLimit.into());
@@ -618,6 +625,8 @@ pub mod Store {
       fn balance_of(self: @ContractState, token: ContractAddress) -> u256 { self.balances.read(token) }
       fn get_deposit(self: @ContractState, tx_id: felt252) -> DepositInfo { self.deposits.read(tx_id) }
       fn is_paused(self: @ContractState) -> bool { self.paused.read() }
+
+      //[x] enforce signature verificaiton
       fn grant_role(
         ref self: ContractState, 
         user: ContractAddress, 
@@ -628,7 +637,7 @@ pub mod Store {
         sig_r: felt252,
         sig_s: felt252
       ) {
-            InternalImpl::_assert_only_owner(ref self);
+            InternalImpl::_assert_only_owner(ref self, signer);
 
             // Compute message hash
             let mut hash = 0;
@@ -658,29 +667,50 @@ pub mod Store {
       fn get_role(self: @ContractState, user: ContractAddress) -> Role { self.roles.read((get_contract_address(), user)) }
       fn is_initialized(self: @ContractState) -> bool { return self.initialized.read(); }
       fn get_nonce(self: @ContractState, signer: ContractAddress) -> u64 { self.nonces.read(signer) }
-       
-       fn test_sign_user(
-          ref self: ContractState,
-          user: ContractAddress,
-          nonce: u64,
-          deadline: u64,
-          sig_r: felt252,
-          sig_s: felt252,
-      ) -> bool {
-          let mut hash = pedersen(1, user.into());
-          hash = pedersen(hash, nonce.into());
-          hash = pedersen(hash, deadline.into());
-          hash = pedersen(hash, selector!("test_sign_user"));
 
-          let recovered_pubkey = recover_public_key(
-              message_hash: hash,
-              signature_r: sig_r,
-              signature_s: sig_s,
-              y_parity: false
-          ).unwrap();
+      //[x]  enforce signature
+      fn block_address(ref self: ContractState, user: ContractAddress) {
+        self._assert_only_owner(user);
+        assert(!user.is_zero(), StoreError::ZeroAddress.into());
+        assert(!self.blocked.read(user), StoreError::AlreadyBlocked.into());
+        self.blocked.write(user, true);
+        self.emit(AddressBlocked { user, blocked_by: get_caller_address() });
+      }
 
-          check_ecdsa_signature(hash, recovered_pubkey, sig_r, sig_s)
-        }
+      //[x]  enforce signature
+      fn unblock_address(ref self: ContractState, user: ContractAddress) {
+          self._assert_only_owner(user);
+          assert(!user.is_zero(), StoreError::ZeroAddress.into());
+          assert(self.blocked.read(user), StoreError::NotBlocked.into());
+          self.blocked.write(user, false);
+          self.emit(AddressUnblocked { user, unblocked_by: get_caller_address() });
+      }
+
+      fn is_blocked(ref self: ContractState, user: ContractAddress) -> bool { self.blocked.read(user) }
+
+      fn get_rejection_count(ref self: ContractState, user: ContractAddress) -> u8 { self.rejection_count.read(user) }
+        fn test_sign_user(
+        ref self: ContractState,
+        user: ContractAddress,
+        nonce: u64,
+        deadline: u64,
+        sig_r: felt252,
+        sig_s: felt252,
+    ) -> bool {
+        let mut hash = pedersen(1, user.into());
+        hash = pedersen(hash, nonce.into());
+        hash = pedersen(hash, deadline.into());
+        hash = pedersen(hash, selector!("test_sign_user"));
+
+        let recovered_pubkey = recover_public_key(
+            message_hash: hash,
+            signature_r: sig_r,
+            signature_s: sig_s,
+            y_parity: false
+        ).unwrap();
+
+        check_ecdsa_signature(hash, recovered_pubkey, sig_r, sig_s)
+      }
     }
 
     #[generate_trait]
@@ -694,11 +724,10 @@ pub mod Store {
             self.roles.read((get_contract_address(), user))
         }
 
-        fn _assert_only_owner(ref self: ContractState) {
-            let caller = get_caller_address();
+        fn _assert_only_owner(ref self: ContractState, user: ContractAddress) {
             assert(
-                caller == self.owner.read()
-                || Self::get_role(@self, caller) == Role::Owner,
+                user == self.owner.read()
+                || Self::get_role(@self, user) == Role::Owner,
                 StoreError::OnlyOwner.into()
             );
         }
@@ -709,9 +738,10 @@ pub mod Store {
             }
         }
 
-        fn _assert_cashier_or_above(ref self: ContractState) {
-            let role = Self::get_role(@self, get_caller_address());
+        fn _assert_cashier_or_above(ref self: ContractState, sender: ContractAddress) {
+            let role = Self::get_role(@self, sender);
             assert(role == Role::Cashier || role == Role::Manager || role == Role::Owner, StoreError::CashierOrHigherRequired.into());
         }
+
     }
 }

@@ -87,7 +87,7 @@ async function main() {
   // 2. Deploy Factory
   // =====================
 
-  const { factoryBuilder, factoryAccount, storeBuilder } =
+  const { factoryBuilder, factoryAccount, storeBuilder, executor } =
     await deployAndInitializeFactory();
 
   // =====================
@@ -185,7 +185,13 @@ async function main() {
   // =====================
   console.log("\nOperating the POS instance...\n");
 
-  await operatePOS(posAddress, factoryBuilder, storeBuilder, tokenAddresses);
+  await operatePOS(
+    posAddress,
+    factoryBuilder,
+    storeBuilder,
+    tokenAddresses,
+    executor
+  );
 
   // =====================
   // Final Output

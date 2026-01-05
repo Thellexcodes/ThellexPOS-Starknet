@@ -27,6 +27,9 @@ export const CUSTOMER_ADDRESS =
 export const CUSTOMER_PRIVATE_KEY =
   "0x00000000000000000000000000000000a20a02f0ac53692d144b20cb371a60d7";
 
+export const BACKEND_ADDRESS = FACTORY_ACCOUNT_ADDRESS;
+export const BACKEND_PRIVATE_KEY = FACTORY_PRIVATE_KEY;
+
 export const FACTORY_ADDRESS =
   "0x789067540ff1ab65991b3746f0710eeedfca6cc7e24a893358fcef8d74f8946";
 
@@ -54,6 +57,12 @@ export const customerAccount = new Account(
   provider,
   CUSTOMER_ADDRESS,
   CUSTOMER_PRIVATE_KEY
+);
+
+const backendAccount = new Account(
+  provider,
+  BACKEND_ADDRESS,
+  BACKEND_PRIVATE_KEY
 );
 
 export const TREASURY = customerAccount.address as ContractAddress;

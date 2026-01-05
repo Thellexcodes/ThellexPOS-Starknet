@@ -2,6 +2,7 @@ import {
   ContractAddress,
   FactoryBuilder,
   StoreBuilder,
+  Executor,
 } from "@thellex/pos-sdk";
 import { LRUCache } from "lru-cache";
 import {
@@ -95,7 +96,8 @@ export async function operatePOS(
   posAddress: ContractAddress,
   factoryBuilder: FactoryBuilder,
   storeBuilder: StoreBuilder,
-  tokenAddresses: ContractAddress[]
+  tokenAddresses: ContractAddress[],
+  executor: Executor
 ) {
   const merchantAddress = merchantAccount.address as ContractAddress;
 
@@ -217,9 +219,7 @@ export async function operatePOS(
                 merchantAccount.address as ContractAddress
               )
             );
-            // const nonce = BigInt(nonceStr);
-            const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
-
+            const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
             const tokenAddress = demoToken;
             const senderAddress = tx.sender_address;
             const signerAddress = merchantAccount.address;
@@ -277,6 +277,16 @@ export async function operatePOS(
             );
 
             dump({ txn });
+
+            // User wants to approve a deposit gaslessly
+            // await executor.signMetaTransaction(
+            //   merchantAccount,
+            //   {
+            //     to: storeAddress,
+            //     entrypoint: "approve_transaction",
+            //     calldata: [tx_id, nonce, deadline, sig_r, sig_s], // Note: modify Store to accept user param if needed
+            //   }
+            // );
 
             // const nonce = BigInt(5);
             // const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour

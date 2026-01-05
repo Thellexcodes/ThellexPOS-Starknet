@@ -29,6 +29,11 @@ pub enum StoreError {
     NotTimedOut,
     InvalidReceiver,
     RejectionLimitReached,
+    InvalidTxId,               
+    AddressBlocked,          
+    AlreadyBlocked,           
+    NotBlocked,               
+    InvalidRequest,            
 }
 
 impl StoreErrorIntoFelt252 of Into<StoreError, felt252> {
@@ -61,6 +66,11 @@ impl StoreErrorIntoFelt252 of Into<StoreError, felt252> {
             StoreError::NotTimedOut => selector!("STORE_NOT_TIMED_OUT"),
             StoreError::InvalidReceiver => selector!("STORE_INVALID_RECEIVER"),
             StoreError::RejectionLimitReached => selector!("STORE_REJECTION_LIMIT_REACHED"),
+            StoreError::InvalidTxId => selector!("STORE_INVALID_TX_ID"),
+            StoreError::AddressBlocked => selector!("STORE_ADDRESS_BLOCKED"),
+            StoreError::AlreadyBlocked => selector!("STORE_ALREADY_BLOCKED"),
+            StoreError::NotBlocked => selector!("STORE_NOT_BLOCKED"),
+            StoreError::InvalidRequest => selector!("STORE_INVALID_REQUEST"),
         }
     }
 }

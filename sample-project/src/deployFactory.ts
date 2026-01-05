@@ -6,6 +6,7 @@ import {
   FactoryBuilder,
   ContractAddress,
   StoreBuilder,
+  Executor,
 } from "@thellex/pos-sdk";
 import {
   NODE_URL,
@@ -44,6 +45,8 @@ export async function deployAndInitializeFactory() {
   });
 
   const storeBuilder = new StoreBuilder(factoryBuilder);
+  // Backend (trusted executor owner)
+  const executor = new Executor(factoryBuilder, "0x...");
 
   const factoryClassHash = factoryBuilder.computeClassHash(factoryContractPath);
   const storeClassHash = factoryBuilder.computeClassHash(storeContractPath);
@@ -90,6 +93,7 @@ export async function deployAndInitializeFactory() {
     storeBuilder,
     factoryAccount,
     storeClassHash,
+    executor,
   };
 }
 
